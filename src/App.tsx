@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 
 // Contract Constants
 const ESCROW_CONTRACT_ADDRESS = "0xc22714197594e4E7174eFF0a74c0D5eAF4F39161"; 
@@ -142,8 +142,200 @@ export default function App() {
   // Incoming payment parameter banner details
   const [paylinkIncomingDoc, setPaylinkIncomingDoc] = useState<string>('');
 
+  // Decoded incoming invoice details state for Buyer to view details
+  const [incomingInvoice, setIncomingInvoice] = useState<{
+    to: string;
+    amount: string;
+    token: string;
+    desc: string;
+    doc: string;
+  } | null>(null);
+
+  // Tab control in Escrow panel if an invoice is active
+  const [escrowTabs, setEscrowTabs] = useState<'invoice' | 'manage'>('manage');
+
   // Logs transaction lists
   const [onChainLogs, setOnChainLogs] = useState<TxHistoryItem[]>([]);
+
+  // Loyalty Points & Gamification States
+  const [activeTheme, setActiveTheme] = useState<string>(() => {
+    return localStorage.getItem('hybri_theme') || 'dark';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hybri_theme', activeTheme);
+    const root = document.documentElement;
+    if (activeTheme === 'light') {
+      root.classList.add('light-mode');
+    } else {
+      root.classList.remove('light-mode');
+    }
+  }, [activeTheme]);
+
+  const [loyaltyPoints, setLoyaltyPoints] = useState<number>(() => {
+    const val = localStorage.getItem('hybri_loyalty_points');
+    return val ? parseInt(val, 10) : 35; // Start with 35 PTS to make tiers prestigious
+  });
+
+  const [activityDates, setActivityDates] = useState<string[]>(() => {
+    const val = localStorage.getItem('hybri_activity_dates');
+    if (val) {
+      return JSON.parse(val);
+    } else {
+      // Pre-seed activities for Saturday (May 30) and Sunday (May 31) 
+      // so when user starts on Monday (June 1), they have an exciting 2-Day Streak to maintain!
+      const today = new Date();
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      
+      const dayBefore = new Date(today);
+      dayBefore.setDate(today.getDate() - 2);
+      const dayBeforeStr = dayBefore.toISOString().split('T')[0];
+      
+      const seeded = [dayBeforeStr, yesterdayStr];
+      localStorage.setItem('hybri_activity_dates', JSON.stringify(seeded));
+      return seeded;
+    }
+  });
+
+  const [lastCheckInDate, setLastCheckInDate] = useState<string>(() => {
+    return localStorage.getItem('hybri_last_checkin_date') || '';
+  });
+
+  const [completedQuests, setCompletedQuests] = useState<string[]>(() => {
+    const val = localStorage.getItem('hybri_completed_quests');
+    return val ? JSON.parse(val) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('hybri_loyalty_points', String(loyaltyPoints));
+  }, [loyaltyPoints]);
+
+  useEffect(() => {
+    localStorage.setItem('hybri_activity_dates', JSON.stringify(activityDates));
+  }, [activityDates]);
+
+  useEffect(() => {
+    localStorage.setItem('hybri_completed_quests', JSON.stringify(completedQuests));
+  }, [completedQuests]);
+
+  // Recalculate streak consecutive count based on registered activity calendar dates
+  const loyaltyStreak = useMemo(() => {
+    if (!activityDates || activityDates.length === 0) return 0;
+    
+    // Unique and sorted in descending order (newest first)
+    const sorted = Array.from(new Set<string>(activityDates)).sort((a: string, b: string) => b.localeCompare(a));
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+    
+    // If not active either today or yesterday, streak is broken
+    if (!sorted.includes(todayStr) && !sorted.includes(yesterdayStr)) {
+      return 0;
+    }
+    
+    let currentTargetStr = sorted.includes(todayStr) ? todayStr : yesterdayStr;
+    let streak = 0;
+    
+    while (sorted.includes(currentTargetStr)) {
+      streak++;
+      const prevDate = new Date(currentTargetStr);
+      prevDate.setDate(prevDate.getDate() - 1);
+      currentTargetStr = prevDate.toISOString().split('T')[0];
+    }
+    
+    return streak;
+  }, [activityDates]);
+
+  // Helper to record activity today to preserve/increment streak
+  const recordActivityToday = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setActivityDates(prev => {
+      if (prev.includes(todayStr)) return prev;
+      const updated = [...prev, todayStr];
+      localStorage.setItem('hybri_activity_dates', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const getTier = (pts: number) => {
+    if (pts < 1000) return { name: 'Bronze', next: 1000, prev: 0, color: '#cd7f32', desc: 'Base Multiplier (1.0x)' };
+    if (pts < 5000) return { name: 'Silver', next: 5000, prev: 1000, color: '#00e5a0', desc: 'Silver Multiplier (1.1x)' };
+    if (pts < 15000) return { name: 'Gold', next: 15000, prev: 5000, color: '#f59e0b', desc: 'Gold Multiplier (1.25x)' };
+    return { name: 'Platinum', next: 50000, prev: 15000, color: '#7b61ff', desc: 'Elite Multiplier (1.5x)' };
+  };
+
+  // Dynamically map Mon-Sun of current week in localized space to verify active check-ins or transaction days
+  const currentWeekDaysStatus = useMemo(() => {
+    const today = new Date();
+    const currentDayOfWeek = today.getDay(); // 0 is Sun, 1 is Mon, 2 is Tue...
+    const diffToMonday = currentDayOfWeek === 0 ? -6 : 1 - currentDayOfWeek;
+    
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diffToMonday);
+    
+    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const todayStr = today.toISOString().split('T')[0];
+
+    return daysOfWeek.map((dayLabel, idx) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + idx);
+      const dateStr = d.toISOString().split('T')[0];
+      const isCompleted = activityDates.includes(dateStr);
+      const isToday = dateStr === todayStr;
+      
+      return {
+        label: dayLabel,
+        dateStr,
+        isCompleted,
+        isToday
+      };
+    });
+  }, [activityDates]);
+
+  // Reactive merchant task completion effects to reward real achievements
+  useEffect(() => {
+    if (invoiceOutputLink !== '' && !completedQuests.includes('invoice_created')) {
+      setCompletedQuests(prev => {
+        const updated = [...prev, 'invoice_created'];
+        localStorage.setItem('hybri_completed_quests', JSON.stringify(updated));
+        return updated;
+      });
+      setLoyaltyPoints(pts => pts + 50); // Harder challenge: +50 PTS
+      recordActivityToday();
+      showToast('🎉 Quest Complete: Created a Paylink Invoice! +50 PTS', 'var(--arc-accent)');
+    }
+  }, [invoiceOutputLink]);
+
+  useEffect(() => {
+    if (pendingEscrows.length > 0 && !completedQuests.includes('escrow_funded')) {
+      setCompletedQuests(prev => {
+        const updated = [...prev, 'escrow_funded'];
+        localStorage.setItem('hybri_completed_quests', JSON.stringify(updated));
+        return updated;
+      });
+      setLoyaltyPoints(pts => pts + 100); // Harder challenge: +100 PTS
+      recordActivityToday();
+      showToast('🎉 Quest Complete: Funded an Escrow Stand! +100 PTS', 'var(--arc-accent)');
+    }
+  }, [pendingEscrows]);
+
+  useEffect(() => {
+    if (vaultPositions.length > 0 && !completedQuests.includes('vault_yield')) {
+      setCompletedQuests(prev => {
+        const updated = [...prev, 'vault_yield'];
+        localStorage.setItem('hybri_completed_quests', JSON.stringify(updated));
+        return updated;
+      });
+      setLoyaltyPoints(pts => pts + 75); // Harder challenge: +75 PTS
+      recordActivityToday();
+      showToast('🎉 Quest Complete: Earn 5.15% APY Vault Yield! +75 PTS', 'var(--arc-accent)');
+    }
+  }, [vaultPositions]);
 
   // Toast State
   const [toastMessage, setToastMessage] = useState<string>('');
@@ -301,7 +493,7 @@ export default function App() {
   };
 
   const loadEscrowsFromStore = () => {
-    const saved = localStorage.getItem('hybr_escrows');
+    const saved = localStorage.getItem('hybri_escrows');
     const parsed: EscrowOrder[] = saved ? JSON.parse(saved) : [];
     setPendingEscrows(parsed);
     calculateLockedFloat(parsed);
@@ -332,7 +524,7 @@ export default function App() {
     };
     current.push(newOrder);
     setPendingEscrows(current);
-    localStorage.setItem('hybr_escrows', JSON.stringify(current));
+    localStorage.setItem('hybri_escrows', JSON.stringify(current));
     calculateLockedFloat(current);
   };
 
@@ -344,7 +536,7 @@ export default function App() {
       return x;
     });
     setPendingEscrows(updated);
-    localStorage.setItem('hybr_escrows', JSON.stringify(updated));
+    localStorage.setItem('hybri_escrows', JSON.stringify(updated));
     calculateLockedFloat(updated);
   };
 
@@ -616,7 +808,24 @@ export default function App() {
     showToast("Updating Dashboard...", 'var(--arc-accent)');
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // 3. Trigger refreshing balances
+    // 3. Award Loyalty Points based on active design streak (Hard mode: 20 PTS base)
+    const basePts = 20;
+    const streakMult = 1.0 + (loyaltyStreak - 1) * 0.1;
+    const totalEarnedPts = Math.round(basePts * streakMult);
+    
+    setLoyaltyPoints(p => {
+      const updated = p + totalEarnedPts;
+      localStorage.setItem('hybri_loyalty_points', String(updated));
+      return updated;
+    });
+
+    // Record activity in the real-time calendar log to advance the streak
+    recordActivityToday();
+
+    showToast(`🌟 +${totalEarnedPts} Loyalty Points earned! (Multiplier: ${streakMult.toFixed(1)}x)`, 'var(--arc-accent)');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 4. Trigger refreshing balances
     const win = window as any;
     if (activeAddress && win.ethereum) {
       const p = new win.ethers.BrowserProvider(win.ethereum);
@@ -1184,13 +1393,26 @@ export default function App() {
         }
         setEscrowToken(matchedAddr);
       }
+      
+      let finalDoc = '';
       if (doc) {
-        let finalDoc = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+        finalDoc = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
         if (doc.startsWith("http") || doc.includes("/")) {
           finalDoc = decodeURIComponent(doc);
         }
         setPaylinkIncomingDoc(finalDoc);
       }
+
+      // Store complete incoming invoice details
+      setIncomingInvoice({
+        to: toAddress,
+        amount: amount || '0',
+        token: token || 'USDC',
+        desc: desc ? decodeURIComponent(desc) : '',
+        doc: finalDoc
+      });
+      setEscrowTabs('invoice');
+
       const parsedDesc = desc ? ` Invoice description: "${decodeURIComponent(desc)}"` : '';
       showToast(`Secure Billing Paylink detected.${parsedDesc}`, 'var(--arc-accent)');
     }
@@ -1371,7 +1593,7 @@ export default function App() {
           ---------------------------------------------------------------------- */}
       {isSplashRendered && (
         <div 
-          id="hybr-splash" 
+          id="hybri-splash" 
           style={{
             position: 'fixed',
             top: 0,
@@ -1421,7 +1643,7 @@ export default function App() {
                   <polygon points="50,54 46,68 54,68" fill="#0a0c0f" />
                 </svg>
                 <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '32px', fontWeight: 'bold', color: '#ffffff', letterSpacing: '0.02em' }}>
-                  Hybr<span style={{ color: '#00e5a0' }}>Pay</span>
+                  Hybri<span style={{ color: '#00e5a0' }}>Pay</span>
                 </span>
               </div>
             </div>
@@ -1461,14 +1683,76 @@ export default function App() {
                 <polygon points="50,54 46,68 54,68" fill="#111417" />
               </svg>
             </div>
-            <span className="arc-logo-text">Hybr<span>Pay</span></span>
+            <span className="arc-logo-text">Hybri<span>Pay</span></span>
           </div>
 
-          <div className="arc-status">
-            <div className="arc-dot"></div>
-            Arc Testnet · Chain 5042002
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            {/* Theme Toggle Pill */}
+            <div 
+              style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '2px', 
+                background: 'rgba(0,0,0,0.4)', 
+                border: '1.5px solid var(--arc-border)', 
+                borderRadius: '4px', 
+                padding: '2px'
+              }}
+            >
+              <button 
+                type="button"
+                onClick={() => {
+                  setActiveTheme('dark');
+                  showToast('🌙 Activated Dark Mode');
+                }}
+                style={{ 
+                  fontSize: '9px', 
+                  fontFamily: "'Space Mono', monospace", 
+                  padding: '2px 8px', 
+                  backgroundColor: activeTheme === 'dark' ? 'var(--arc-accent)' : 'transparent',
+                  color: activeTheme === 'dark' ? '#000000' : 'var(--arc-muted)',
+                  border: 'none',
+                  borderRadius: '2px',
+                  cursor: 'pointer',
+                  fontWeight: activeTheme === 'dark' ? 'bold' : 'normal',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <i className="ti ti-moon" style={{ fontSize: '10px' }} /> Dark Mode
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  setActiveTheme('light');
+                  showToast('☀️ Activated Light Mode');
+                }}
+                style={{ 
+                  fontSize: '9px', 
+                  fontFamily: "'Space Mono', monospace", 
+                  padding: '2px 8px', 
+                  backgroundColor: activeTheme === 'light' ? 'var(--arc-accent)' : 'transparent',
+                  color: activeTheme === 'light' ? '#ffffff' : 'var(--arc-muted)',
+                  border: 'none',
+                  borderRadius: '2px',
+                  cursor: 'pointer',
+                  fontWeight: activeTheme === 'light' ? 'bold' : 'normal',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <i className="ti ti-sun" style={{ fontSize: '10px' }} /> Light Mode
+              </button>
+            </div>
+
+            <div className="arc-status">
+              <div className="arc-dot"></div>
+              Arc Testnet · Chain 5042002
+            </div>
+            <div className="arc-badge">Testnet</div>
           </div>
-          <div className="arc-badge">Testnet</div>
         </div>
 
         {/* Application Navigation Split */}
@@ -1545,7 +1829,7 @@ export default function App() {
                 </div>
 
                 {/* KPI Metrics Grid */}
-                <div className="arc-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                <div className="arc-grid">
                   <div className="arc-stat">
                     <div className="arc-stat-label">Portfolio Value</div>
                     <div className="arc-stat-value" id="portfolio-value">{portfolioValue}</div>
@@ -1555,6 +1839,14 @@ export default function App() {
                     <div className="arc-stat-label">Transactions</div>
                     <div className="arc-stat-value" id="tx-count">{txCount}</div>
                     <div className="arc-stat-sub">Historical Tx Count</div>
+                  </div>
+                  <div className="arc-stat">
+                    <div className="arc-stat-label">Loyalty Standing</div>
+                    <div className="arc-stat-value" id="loyalty-pts" style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                      <span style={{ fontSize: '26px', color: getTier(loyaltyPoints).color, fontWeight: 'bold' }}>{getTier(loyaltyPoints).name}</span>
+                      <span style={{ fontSize: '13px', color: 'var(--arc-muted)', fontFamily: "'Space Mono', monospace" }}>{loyaltyPoints} pts</span>
+                    </div>
+                    <div className="arc-stat-sub">Multiplier: <span style={{ color: 'var(--arc-accent)', fontWeight: 'bold' }}>{(1.0 + (loyaltyStreak - 1) * 0.1).toFixed(1)}x</span></div>
                   </div>
                 </div>
 
@@ -1614,6 +1906,249 @@ export default function App() {
                     <div style={{ width: '100%', maxWidth: '170px', margin: '0 auto', minHeight: '170px' }}>
                       <canvas id="portfolio-chart"></canvas>
                     </div>
+                  </div>
+                </div>
+
+                {/* -----------------------------------------------------------------
+                    HYBRIPAY LOYALTY ARENA & GAMIFIED STATIONS
+                    ---------------------------------------------------------------- */}
+                <div className="arc-panel" style={{ marginTop: '20px', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid var(--arc-border)', paddingBottom: '16px', marginBottom: '20px' }}>
+                    <div>
+                      <div className="arc-panel-title" style={{ fontSize: '18px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <i className="ti ti-crown" style={{ color: '#ffd700' }} aria-hidden="true"></i> HybriPay Loyalty Station
+                      </div>
+                      <p style={{ fontSize: '11px', color: 'var(--arc-muted)', marginTop: '4px' }}>
+                        Active transacting rewards you with points redeemable for future gas compensation & native <span style={{ color: 'var(--arc-accent)', fontWeight: 600 }}>$HYBRIPAY</span> token rewards!
+                      </p>
+                    </div>
+
+                    {/* Streak flame indicator */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '12px', padding: '8px 14px' }}>
+                      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <i className="ti ti-flame" style={{ fontSize: '24px', color: '#f59e0b' }} />
+                        <span style={{ position: 'absolute', fontSize: '9px', fontWeight: 'bold', color: '#ffffff', bottom: '-4px', backgroundColor: '#e35f4a', padding: '1px 4px', borderRadius: '4px' }}>
+                          x{(1.0 + (loyaltyStreak - 1) * 0.1).toFixed(1)}
+                        </span>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--arc-text)' }}>
+                          {loyaltyStreak} Day Streak
+                        </div>
+                        <div style={{ fontSize: '9px', color: 'var(--arc-muted)' }}>
+                          Active Streak Multiplier
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="arc-split-layout" style={{ gridTemplateColumns: 'minmax(0, 1.15fr) minmax(0, 0.85fr)', gap: '20px', margin: 0 }}>
+                    
+                    {/* LEFT COLUMN: TIER AND PROGRESS RING / BAR */}
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', background: '#080a0e', border: '1px solid var(--arc-border)', borderRadius: '12px', padding: '20px' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                            <i className="ti ti-award" /> Tier Standing & Milestone
+                          </span>
+                          <span style={{ fontSize: '10px', color: getTier(loyaltyPoints).color, fontWeight: 'bold', textTransform: 'uppercase', background: 'rgba(255,255,255,0.04)', padding: '2px 8px', borderRadius: '12px', border: `1px solid ${getTier(loyaltyPoints).color}44` }}>
+                            {getTier(loyaltyPoints).name} Member
+                          </span>
+                        </div>
+
+                        {/* Circular progress container or beautiful high-fidelity bar */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '24px', padding: '8px 0' }}>
+                          {/* Beautiful SVG Circular Progress */}
+                          <div style={{ position: 'relative', width: '80px', height: '80px', flexShrink: 0 }}>
+                            <svg width="80" height="80" viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
+                              {/* Background arc */}
+                              <path
+                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                fill="none"
+                                stroke="var(--arc-border)"
+                                strokeWidth="3.5"
+                              />
+                              {/* Progress arc */}
+                              <path
+                                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                fill="none"
+                                stroke={getTier(loyaltyPoints).color}
+                                strokeWidth="3.5"
+                                strokeDasharray={`${Math.min(100, Math.max(0, ((loyaltyPoints - getTier(loyaltyPoints).prev) / (getTier(loyaltyPoints).next - getTier(loyaltyPoints).prev)) * 100))}, 100`}
+                              />
+                            </svg>
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: '15px', fontWeight: 'bold', color: 'var(--arc-text)', fontFamily: "'Space Mono', monospace" }}>
+                                {Math.round(((loyaltyPoints - getTier(loyaltyPoints).prev) / (getTier(loyaltyPoints).next - getTier(loyaltyPoints).prev)) * 100)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--arc-text)', fontFamily: "'Space Mono', monospace" }}>
+                              {loyaltyPoints} <span style={{ fontSize: '11px', color: 'var(--arc-muted)', fontWeight: 'normal' }}>/ {getTier(loyaltyPoints).next} PTS</span>
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--arc-muted)', marginTop: '4px', lineHeight: '1.4' }}>
+                              {getTier(loyaltyPoints).next - loyaltyPoints > 0 ? (
+                                <span>
+                                  Collect <strong style={{ color: 'var(--arc-text)' }}>{getTier(loyaltyPoints).next - loyaltyPoints}</strong> more points to promote to the next tier standing.
+                                </span>
+                              ) : (
+                                <span>Highest Tier Level Standing! Keep stackin'!</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Daily Interaction check-in booster box */}
+                      <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '16px', marginTop: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--arc-text)' }}>Daily Interaction Booster</div>
+                            <div style={{ fontSize: '9px', color: 'var(--arc-muted)' }}>Claim once daily for +15 PTS & streak security</div>
+                          </div>
+                          
+                          <button
+                            className="arc-btn"
+                            disabled={lastCheckInDate === new Date().toISOString().split('T')[0]}
+                            style={{ 
+                              width: 'auto', 
+                              margin: 0, 
+                              padding: '6px 14px', 
+                              fontSize: '11px',
+                              opacity: lastCheckInDate === new Date().toISOString().split('T')[0] ? 0.5 : 1,
+                              cursor: lastCheckInDate === new Date().toISOString().split('T')[0] ? 'not-allowed' : 'pointer',
+                              background: lastCheckInDate === new Date().toISOString().split('T')[0] ? 'var(--arc-border)' : 'var(--arc-accent)',
+                              color: lastCheckInDate === new Date().toISOString().split('T')[0] ? 'var(--arc-muted)' : '#000000',
+                            }}
+                            onClick={() => {
+                              const todayStr = new Date().toISOString().split('T')[0];
+                              if (lastCheckInDate === todayStr) {
+                                showToast('Booster already claimed for today!');
+                                return;
+                              }
+                              
+                              setLastCheckInDate(todayStr);
+                              localStorage.setItem('hybri_last_checkin_date', todayStr);
+                              
+                              setLoyaltyPoints(prev => prev + 15); // Authentic hard mode: +15 PTS
+                              recordActivityToday();
+                              
+                              showToast('🌟 +15 PTS Claimed! Daily Streak multiplier preserved!', 'var(--arc-accent)');
+                            }}
+                          >
+                            {lastCheckInDate === new Date().toISOString().split('T')[0] ? 'Claimed Today' : 'Claim +15 PTS'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+ 
+                    {/* RIGHT COLUMN: PROGRESS STREAK WORKOUT & ACTIVE CHALLENGES */}
+                    <div style={{ display: 'flex', flexDirection: 'column', background: '#080a0e', border: '1px solid var(--arc-border)', borderRadius: '12px', padding: '20px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                          <i className="ti ti-flame" /> Interactive Streak Tracker
+                        </span>
+                        <span style={{ fontSize: '10px', color: 'var(--arc-accent)', fontWeight: 'bold' }}>
+                          MULTIPLIER: {(1.0 + (loyaltyStreak - 1) * 0.1).toFixed(1)}x
+                        </span>
+                      </div>
+ 
+                      {/* Day Tracker bubble layout */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', padding: '4px 0', flexWrap: 'nowrap', gap: '4px' }}>
+                        {currentWeekDaysStatus.map((day) => {
+                          const isCompleted = day.isCompleted;
+                          const isToday = day.isToday;
+                          return (
+                            <div key={day.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: 1 }}>
+                              <div style={{
+                                width: '28px',
+                                height: '28px',
+                                borderRadius: '50%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: isCompleted ? 'rgba(0, 229, 160, 0.12)' : isToday ? 'rgba(245, 158, 11, 0.08)' : '#0d1014',
+                                border: isCompleted ? '1px solid var(--arc-accent)' : isToday ? '1.5px dashed #f59e0b' : '1px solid var(--arc-border)',
+                                color: isCompleted ? 'var(--arc-accent)' : isToday ? '#f59e0b' : 'var(--arc-muted)',
+                                fontSize: '10px',
+                                fontWeight: 'bold',
+                                cursor: 'default'
+                              }}>
+                                {isCompleted ? <i className="ti ti-check" /> : isToday ? <i className="ti ti-flame" style={{ color: '#f59e0b' }} /> : day.label.slice(0, 1)}
+                              </div>
+                              <span style={{ fontSize: '9px', color: isCompleted ? 'var(--arc-accent)' : isToday ? '#f59e0b' : 'var(--arc-muted)', fontWeight: isToday ? 'bold' : 'normal', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                {day.label}
+                                {isToday && <span style={{ fontSize: '7px', display: 'block', transform: 'scale(0.85)', color: '#f59e0b', marginTop: '-2px' }}>Today</span>}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+ 
+                      {/* Quests Lists for the user */}
+                      <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '12px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '10px' }}>
+                          Daily Merchant Quests
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          
+                          {/* Quest 1 */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0b0d11', border: '1px solid var(--arc-border)', borderRadius: '8px', padding: '8px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="checkbox" 
+                                readOnly 
+                                checked={completedQuests.includes('invoice_created')} 
+                                style={{ accentColor: 'var(--arc-accent)', width: '13px', height: '13px' }} 
+                              />
+                              <div>
+                                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--arc-text)' }}>Create a Paylink Invoice</div>
+                                <div style={{ fontSize: '9px', color: 'var(--arc-muted)' }}>Share a secure checkout link with a client</div>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '10px', color: 'var(--arc-accent)', fontWeight: 'bold', fontFamily: "'Space Mono', monospace" }}>+50 PTS</span>
+                          </div>
+ 
+                          {/* Quest 2 */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0b0d11', border: '1px solid var(--arc-border)', borderRadius: '8px', padding: '8px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="checkbox" 
+                                readOnly 
+                                checked={completedQuests.includes('escrow_funded')} 
+                                style={{ accentColor: 'var(--arc-accent)', width: '13px', height: '13px' }} 
+                              />
+                              <div>
+                                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--arc-text)' }}>Fund a DeFi Escrow Stand</div>
+                                <div style={{ fontSize: '9px', color: 'var(--arc-muted)' }}>Lock funds in non-custodial Escrow protection</div>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '10px', color: 'var(--arc-accent)', fontWeight: 'bold', fontFamily: "'Space Mono', monospace" }}>+100 PTS</span>
+                          </div>
+ 
+                          {/* Quest 3 */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0b0d11', border: '1px solid var(--arc-border)', borderRadius: '8px', padding: '8px 12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="checkbox" 
+                                readOnly 
+                                checked={completedQuests.includes('vault_yield')} 
+                                style={{ accentColor: 'var(--arc-accent)', width: '13px', height: '13px' }} 
+                              />
+                              <div>
+                                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--arc-text)' }}>Earn 5.15% APY Vault Yield</div>
+                                <div style={{ fontSize: '9px', color: 'var(--arc-muted)' }}>Lock USDC reserves in the USYC Yield Vault</div>
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '10px', color: 'var(--arc-accent)', fontWeight: 'bold', fontFamily: "'Space Mono', monospace" }}>+75 PTS</span>
+                          </div>
+ 
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
                 </div>
               </div>
@@ -1691,79 +2226,296 @@ export default function App() {
 
                   <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '440px' }}>
                     <div>
-                      <div className="arc-panel-title" style={{ marginBottom: '8px' }}>
-                        <i className="ti ti-settings" aria-hidden="true"></i> Manage Escrow Orders
-                      </div>
-                      <div className="arc-field" style={{ marginBottom: '14px' }}>
-                        <label>Escrow Order ID</label>
-                        <input className="arc-input" type="number" placeholder="0" value={activeEscrowId} onChange={(e) => setActiveEscrowId(e.target.value)} />
-                      </div>
-
-                      {/* USYC yield dynamic currency box */}
-                      <div style={{ background: 'rgba(123,97,255,0.06)', border: '1px solid rgba(123,97,255,0.2)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--arc-accent2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                            <i className="ti ti-coin"></i> USYC Yield Treasury
-                          </span>
-                          <span style={{ fontSize: '10px', background: 'rgba(123,97,255,0.15)', color: 'var(--arc-accent2)', padding: '2px 6px', borderRadius: '12px', fontWeight: 600 }}>
-                            5.15% APY
-                          </span>
+                      {/* Interactive Tab Selector if an incoming invoice is pinned */}
+                      {incomingInvoice ? (
+                        <div style={{ display: 'flex', background: '#080a0e', border: '1px solid var(--arc-border)', borderRadius: '8px', padding: '4px', marginBottom: '18px', gap: '4px' }}>
+                          <button 
+                            className="arc-btn" 
+                            style={{ 
+                              flex: 1, 
+                              margin: 0, 
+                              fontSize: '11px', 
+                              padding: '8px 12px', 
+                              borderRadius: '6px',
+                              background: escrowTabs === 'invoice' ? 'var(--arc-border)' : 'transparent', 
+                              border: 'none',
+                              color: escrowTabs === 'invoice' ? 'var(--arc-text)' : 'var(--arc-muted)',
+                              fontWeight: escrowTabs === 'invoice' ? '600' : 'normal',
+                              cursor: 'pointer'
+                            }} 
+                            onClick={() => setEscrowTabs('invoice')}
+                          >
+                            <i className="ti ti-receipt" aria-hidden="true"></i> Digital Invoice Bill
+                          </button>
+                          <button 
+                            className="arc-btn" 
+                            style={{ 
+                              flex: 1, 
+                              margin: 0, 
+                              fontSize: '11px', 
+                              padding: '8px 12px', 
+                              borderRadius: '6px',
+                              background: escrowTabs === 'manage' ? 'var(--arc-border)' : 'transparent', 
+                              border: 'none',
+                              color: escrowTabs === 'manage' ? 'var(--arc-text)' : 'var(--arc-muted)',
+                              fontWeight: escrowTabs === 'manage' ? '600' : 'normal',
+                              cursor: 'pointer'
+                            }} 
+                            onClick={() => setEscrowTabs('manage')}
+                          >
+                            <i className="ti ti-settings" aria-hidden="true"></i> Manage Escrows
+                          </button>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--arc-muted)' }}>
-                          <span>Locked Float: <span style={{ color: 'var(--arc-text)', fontWeight: 600 }}>${yieldFloat.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
-                          <span>Accruing Yield: <span style={{ color: 'var(--arc-accent2)', fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>${yieldAccumulated.toFixed(8)}</span></span>
+                      ) : (
+                        <div className="arc-panel-title" style={{ marginBottom: '8px' }}>
+                          <i className="ti ti-settings" aria-hidden="true"></i> Manage Escrow Orders
                         </div>
-                      </div>
-
-                      <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '12px' }}>
-                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: '10px' }}>
-                          Your Active Escrows
-                        </div>
-                        <div id="pending-escrows-list" style={{ maxHeight: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {pendingEscrows.filter(x => x.status === 'PENDING').length === 0 ? (
-                            <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textAlign: 'center', padding: '10px 0' }}>
-                              No active escrows.
-                            </div>
-                          ) : (
-                            pendingEscrows.filter(x => x.status === 'PENDING').map(item => (
-                              <div 
-                                key={item.id} 
-                                onClick={() => {
-                                  setActiveEscrowId(String(item.id));
-                                  setSelectedEscrowDoc(item.docUrl || '');
-                                  showToast(`Selected Order ID #${item.id}`);
-                                }}
-                                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#0d1014', border: '1px solid var(--arc-border)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
-                              >
-                                <div>
-                                  <span style={{ fontWeight: 600, color: 'var(--arc-accent)' }}>ID #{item.id}</span>
-                                  <span style={{ color: 'var(--arc-text)', marginLeft: '8px' }}>{item.amount} {item.token}</span>
-                                  {item.docUrl && <span style={{ fontSize: '9px', color: 'var(--arc-accent)', marginLeft: '6px' }}><i className="ti ti-file-text"></i> PDF</span>}
-                                </div>
-                                <span style={{ fontSize: '10px', color: '#f7921a', fontWeight: 600, textTransform: 'uppercase' }}>Pending</span>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
-                      {selectedEscrowDoc && (
-                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, width: '100%', borderColor: 'rgba(0,229,160,0.3)', color: 'var(--arc-accent)' }} onClick={() => window.open(selectedEscrowDoc, '_blank')}>
-                          <i className="ti ti-file-text"></i> View Shipping Document
-                        </button>
                       )}
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0 }} onClick={confirmReleaseEscrow}>
-                          Release Funds
-                        </button>
-                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, borderColor: 'rgba(227,95,74,0.3)', color: '#e35f4a' }} onClick={confirmRefundEscrow}>
-                          Issue Refund
-                        </button>
-                      </div>
+
+                      {/* Display Incoming Digital Invoice details */}
+                      {incomingInvoice && escrowTabs === 'invoice' ? (
+                        <div id="digital-invoice-bill-container" style={{ background: '#0a0c0f', border: '1px dashed var(--arc-border)', borderRadius: '12px', padding: '16px', position: 'relative', overflow: 'hidden' }}>
+                          {/* Top receipt accent strip */}
+                          <div style={{ height: '4px', background: 'var(--arc-accent)', position: 'absolute', top: 0, left: 0, right: 0 }} />
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', marginTop: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <i className="ti ti-shield-check" style={{ fontSize: '15px', color: 'var(--arc-accent)' }} />
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>HybriPay Invoice Bill</span>
+                            </div>
+                            <span style={{ fontSize: '10px', background: 'rgba(0, 229, 160, 0.1)', color: 'var(--arc-accent)', padding: '2px 8px', borderRadius: '12px', fontWeight: 600 }}>
+                              UNPAID
+                            </span>
+                          </div>
+
+                          {/* Invoice Ref & Date */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--arc-muted)', marginBottom: '12px', borderBottom: '1px solid #141920', paddingBottom: '8px' }}>
+                            <span>REF: <span style={{ fontFamily: "'Space Mono', monospace", color: 'var(--arc-text)' }}>
+                              {(() => {
+                                let hash = 0;
+                                const str = incomingInvoice.to;
+                                for (let i = 0; i < str.length; i++) {
+                                  hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                                }
+                                return `INV-2026-${Math.abs(hash % 100000).toString().padStart(5, '0')}`;
+                              })()}
+                            </span></span>
+                            <span>DATE: <span style={{ color: 'var(--arc-text)' }}>{new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}</span></span>
+                          </div>
+
+                          {/* Merchant Detail */}
+                          <div style={{ marginBottom: '12px' }}>
+                            <label style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--arc-muted)', display: 'block', marginBottom: '4px' }}>Sender (Seller/Merchant)</label>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0e1217', borderRadius: '6px', padding: '8px 10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <i className="ti ti-building-store" style={{ color: 'var(--arc-accent2)', fontSize: '14px' }} />
+                                <span style={{ fontSize: '11px', fontFamily: "'Space Mono', monospace", color: 'var(--arc-text)' }}>
+                                  {incomingInvoice.to.slice(0, 8)}...{incomingInvoice.to.slice(-6)}
+                                </span>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', fontSize: '9px', color: '#10b981', background: 'rgba(16,185,129,0.1)', padding: '1px 5px', borderRadius: '4px', fontWeight: 500 }}>
+                                  Verified
+                                </span>
+                              </div>
+                              <button 
+                                className="arc-btn" 
+                                style={{ width: 'auto', margin: 0, padding: '2px 6px', fontSize: '10px' }}
+                                onClick={() => {
+                                  navigator.clipboard.writeText(incomingInvoice.to);
+                                  showToast('Merchant address copied!');
+                                }}
+                              >
+                                <i className="ti ti-copy" aria-hidden="true"></i>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Description detail */}
+                          <div style={{ marginBottom: '12px' }}>
+                            <label style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--arc-muted)', display: 'block', marginBottom: '4px' }}>Invoice Description</label>
+                            <div style={{ background: '#0e1217', borderRadius: '6px', padding: '8px 10px', fontSize: '11px', color: 'var(--arc-text)', lineHeight: '1.4', minHeight: '38px', wordBreak: 'break-word' }}>
+                              {incomingInvoice.desc || 'No description provided.'}
+                            </div>
+                          </div>
+
+                          {/* Shipping Proof File Attachment if present */}
+                          {incomingInvoice.doc && (
+                            <div style={{ marginBottom: '12px' }}>
+                              <label style={{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--arc-muted)', display: 'block', marginBottom: '4px' }}>Proof / Document Attachment</label>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0e1217', border: '1px dashed rgba(0,229,160,0.2)', borderRadius: '6px', padding: '8px 10px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                                  <i className="ti ti-file-text" style={{ color: 'var(--arc-accent)', fontSize: '16px' }} />
+                                  <span style={{ fontSize: '11px', color: 'var(--arc-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '140px' }}>
+                                    agreement_invoice_doc.pdf
+                                  </span>
+                                </div>
+                                <button 
+                                  className="arc-btn" 
+                                  style={{ width: 'auto', margin: 0, padding: '4px 8px', fontSize: '10px', background: 'rgba(0,229,160,0.1)', color: 'var(--arc-accent)', border: '1px solid rgba(0,229,160,0.2)' }}
+                                  onClick={() => window.open(incomingInvoice.doc, '_blank')}
+                                >
+                                  View Document
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Amount Detail with large design */}
+                          <div style={{ background: '#0e1217', borderRadius: '8px', padding: '12px', border: '1px solid var(--arc-border)', marginBottom: '12px', textAlign: 'center' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Invoice Grand Total</div>
+                            <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--arc-text)', fontFamily: "'Space Mono', monospace", display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ color: 'var(--arc-accent)' }}>{incomingInvoice.amount}</span>
+                              <span style={{ fontSize: '12px', background: 'var(--arc-border)', color: 'var(--arc-text)', padding: '2px 8px', borderRadius: '6px', verticalAlign: 'middle', fontWeight: 600 }}>{incomingInvoice.token}</span>
+                            </div>
+                          </div>
+
+                          {/* Security details */}
+                          <div style={{ fontSize: '9px', color: 'var(--arc-muted)', textAlign: 'center', padding: '0 4px', lineHeight: '1.3' }}>
+                            <i className="ti ti-info-circle" style={{ color: 'var(--arc-accent)', marginRight: '2px' }}></i> This invoice funds a secure, non-custodial Smart Escrow with locked USYC continuous yield accrual. Release only when cargo arrives.
+                          </div>
+                        </div>
+                      ) : (
+                        /* STANDARD MANAGE ESCROW ORDERS */
+                        <div>
+                          <div className="arc-field" style={{ marginBottom: '14px' }}>
+                            <label>Escrow Order ID</label>
+                            <input className="arc-input" type="number" placeholder="0" value={activeEscrowId} onChange={(e) => setActiveEscrowId(e.target.value)} />
+                          </div>
+
+                          {/* USYC yield dynamic currency box */}
+                          <div style={{ background: 'rgba(123,97,255,0.06)', border: '1px solid rgba(123,97,255,0.2)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--arc-accent2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                <i className="ti ti-coin"></i> USYC Yield Treasury
+                              </span>
+                              <span style={{ fontSize: '10px', background: 'rgba(123,97,255,0.15)', color: 'var(--arc-accent2)', padding: '2px 6px', borderRadius: '12px', fontWeight: 600 }}>
+                                5.15% APY
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--arc-muted)' }}>
+                              <span>Locked Float: <span style={{ color: 'var(--arc-text)', fontWeight: 600 }}>${yieldFloat.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                              <span>Accruing Yield: <span style={{ color: 'var(--arc-accent2)', fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>${yieldAccumulated.toFixed(8)}</span></span>
+                            </div>
+                          </div>
+
+                          <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '12px' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: '10px' }}>
+                              Your Active Escrows
+                            </div>
+                            <div id="pending-escrows-list" style={{ maxHeight: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {pendingEscrows.filter(x => x.status === 'PENDING').length === 0 ? (
+                                <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textAlign: 'center', padding: '10px 0' }}>
+                                  No active escrows.
+                                </div>
+                              ) : (
+                                pendingEscrows.filter(x => x.status === 'PENDING').map(item => (
+                                  <div 
+                                    key={item.id} 
+                                    onClick={() => {
+                                      setActiveEscrowId(String(item.id));
+                                      setSelectedEscrowDoc(item.docUrl || '');
+                                      showToast(`Selected Order ID #${item.id}`);
+                                    }}
+                                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#0d1014', border: '1px solid var(--arc-border)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                                  >
+                                    <div>
+                                      <span style={{ fontWeight: 600, color: 'var(--arc-accent)' }}>ID #{item.id}</span>
+                                      <span style={{ color: 'var(--arc-text)', marginLeft: '8px' }}>{item.amount} {item.token}</span>
+                                      {item.docUrl && <span style={{ fontSize: '9px', color: 'var(--arc-accent)', marginLeft: '6px' }}><i className="ti ti-file-text"></i> PDF</span>}
+                                    </div>
+                                    <span style={{ fontSize: '10px', color: '#f7921a', fontWeight: 600, textTransform: 'uppercase' }}>Pending</span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Footer Controls for current tab */}
+                    {incomingInvoice && escrowTabs === 'invoice' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                        <button 
+                          className="arc-btn" 
+                          style={{ margin: 0, width: '100%', cursor: 'pointer', fontWeight: 600, background: 'var(--arc-accent)', color: '#000000' }} 
+                          onClick={() => {
+                            setEscrowSeller(incomingInvoice.to);
+                            setEscrowAmount(incomingInvoice.amount);
+                            let matchedAddr = TOKENS.USDC.address;
+                            for (const k in TOKENS) {
+                              if (TOKENS[k].symbol === incomingInvoice.token) {
+                                matchedAddr = TOKENS[k].address;
+                              }
+                            }
+                            setEscrowToken(matchedAddr);
+                            if (incomingInvoice.doc) {
+                              setPaylinkIncomingDoc(incomingInvoice.doc);
+                            }
+                            
+                            // Call deposit creator directly
+                            confirmCreateEscrowDeposit();
+                          }}
+                        >
+                          <i className="ti ti-shield-lock" aria-hidden="true"></i> Fund Escrow Deposit
+                        </button>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          <button 
+                            className="arc-btn arc-btn-secondary" 
+                            style={{ margin: 0 }} 
+                            onClick={() => {
+                              setEscrowSeller(incomingInvoice.to);
+                              setEscrowAmount(incomingInvoice.amount);
+                              let matchedAddr = TOKENS.USDC.address;
+                              for (const k in TOKENS) {
+                                  if (TOKENS[k].symbol === incomingInvoice.token) {
+                                    matchedAddr = TOKENS[k].address;
+                                  }
+                              }
+                              setEscrowToken(matchedAddr);
+                              if (incomingInvoice.doc) {
+                                setPaylinkIncomingDoc(incomingInvoice.doc);
+                              }
+                              showToast("Invoice values synced into checkout form!");
+                            }}
+                          >
+                            <i className="ti ti-refresh" aria-hidden="true"></i> Sync Form
+                          </button>
+                          
+                          <button 
+                            className="arc-btn arc-btn-secondary" 
+                            style={{ margin: 0, borderColor: 'rgba(227,95,74,0.3)', color: '#e35f4a' }} 
+                            onClick={() => {
+                              setIncomingInvoice(null);
+                              setPaylinkIncomingDoc('');
+                              // Clear url query parameters safely
+                              const cleanUrl = window.location.origin + window.location.pathname;
+                              window.history.replaceState({}, document.title, cleanUrl);
+                              showToast('Invoice dismissed.');
+                            }}
+                          >
+                            <i className="ti ti-trash" aria-hidden="true"></i> Dismiss Bill
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                        {selectedEscrowDoc && (
+                          <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, width: '100%', borderColor: 'rgba(0,229,160,0.3)', color: 'var(--arc-accent)' }} onClick={() => window.open(selectedEscrowDoc, '_blank')}>
+                            <i className="ti ti-file-text" aria-hidden="true"></i> View Shipping Document
+                          </button>
+                        )}
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                          <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0 }} onClick={confirmReleaseEscrow}>
+                            Release Funds
+                          </button>
+                          <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, borderColor: 'rgba(227,95,74,0.3)', color: '#e35f4a' }} onClick={confirmRefundEscrow}>
+                            Issue Refund
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1827,7 +2579,7 @@ export default function App() {
                         <i className="ti ti-share" aria-hidden="true"></i> Share Invoice Link
                       </div>
                       <div style={{ fontSize: '11px', color: 'var(--arc-muted)', lineHeight: 1.6, marginBottom: '16px' }}>
-                        Copy the secure Web2.5 checkout link below and send it to your customer. When opened, it automatically configures their dashboard and pre-fills the on-chain escrow contract.
+                        Copy the secure on-chain Web3 checkout link below and send it to your customer. When opened, it automatically configures their dashboard and pre-fills the on-chain escrow contract.
                       </div>
                       <div className="arc-field">
                         <label>Your Unique Invoice Link</label>

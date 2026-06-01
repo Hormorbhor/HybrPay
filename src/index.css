@@ -19,6 +19,71 @@
   --arc-card: #161d28;
 }
 
+/* Light Mode overrides - a gorgeous, clean, highly readable crisp cream/light gray pixel layout */
+:root.light-mode {
+  --arc-bg: #f8fafc;
+  --arc-surface: #ffffff;
+  --arc-border: #cbd5e1;
+  --arc-accent: #0f766e; /* Cozy readable dark teal */
+  --arc-accent2: #7c3aed; /* Creative high-contrast purple */
+  --arc-text: #0f172a; /* Deep contrast charcoal for perfect reading */
+  --arc-muted: #475569; /* Soft dark slate for labels */
+  --arc-card: #ffffff; /* pure white cards */
+}
+
+/* Clearer styles for Light Mode inputs and cards to secure elite readability */
+:root.light-mode .arc-stat-value {
+  color: #0f172a !important;
+}
+:root.light-mode .arc-panel,
+:root.light-mode .arc-card,
+:root.light-mode .arc-stat {
+  box-shadow: 2px 2px 0px #000000;
+  border-color: #000000;
+  background: #ffffff;
+}
+:root.light-mode input,
+:root.light-mode select,
+:root.light-mode textarea {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #000000 !important;
+}
+:root.light-mode input::placeholder {
+  color: #94a3b8 !important;
+}
+:root.light-mode .arc-btn {
+  border-color: #000000 !important;
+}
+:root.light-mode .arc-nav-item.active {
+  background: var(--arc-accent) !important;
+  color: #ffffff !important;
+}
+:root.light-mode .arc-nav-item:not(.active) {
+  color: #475569 !important;
+}
+:root.light-mode .arc-nav-item:not(.active):hover {
+  background: #f1f5f9 !important;
+}
+:root.light-mode .arc-logo-text {
+  color: #0f172a !important;
+}
+:root.light-mode .arc-status {
+  color: #475569 !important;
+}
+:root.light-mode p,
+:root.light-mode div {
+  text-shadow: none !important;
+}
+:root.light-mode .arc-btn-outline {
+  background: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #000000 !important;
+}
+:root.light-mode .arc-btn-outline:hover {
+  background: #f8fafc !important;
+}
+
 /* Scrollbar overhaul to pixel blocks */
 ::-webkit-scrollbar {
   width: 10px;
@@ -655,7 +720,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* SPLASH SCREEN RETRO UPGRADE */
-#hybr-splash {
+#hybri-splash {
   background-image: 
     radial-gradient(circle at center, #1b2332 0%, #080a0e 100%),
     linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%) !important;
