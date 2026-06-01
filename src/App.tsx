@@ -1,0 +1,2420 @@
+import { useEffect, useState, useRef } from 'react';
+
+// Contract Constants
+const ESCROW_CONTRACT_ADDRESS = "0xc22714197594e4E7174eFF0a74c0D5eAF4F39161"; 
+const VAULT_CONTRACT_ADDRESS = "0xE4fAA84E62a0a731f388a6dAA5B0Eb22D30b726d";
+
+interface TokenInfo {
+  address: string;
+  decimals: number;
+  symbol: string;
+  usdRate: number;
+}
+
+const TOKENS: Record<string, TokenInfo> = {
+  USDC: {
+    address: "0x3600000000000000000000000000000000000000",
+    decimals: 6,
+    symbol: "USDC",
+    usdRate: 1.00
+  },
+  EURC: {
+    address: "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a",
+    decimals: 6,
+    symbol: "EURC",
+    usdRate: 1.08
+  },
+  USYC: {
+    address: "0xe9185F0c5F296Ed1797AaE4238D26CCaBEadb86C",
+    decimals: 6,
+    symbol: "USYC",
+    usdRate: 1.00
+  }
+};
+
+const ESCROW_ABI = [
+  "function createEscrow(address _seller, address _token, uint256 _amount) external returns (uint256)",
+  "function releaseEscrow(uint256 _escrowId) external",
+  "function refundEscrow(uint256 _escrowId) external",
+  "function nextEscrowId() view returns (uint256)"
+];
+
+const VAULT_ABI = [
+  "function createVault(uint256 _amount, uint256 _durationMins) external",
+  "function claimVault(uint256 _positionId) external",
+  "function getPositionsCount(address _user) external view returns (uint256)",
+  "function userPositions(address _user, uint256 index) external view returns (uint256 id, address user, uint256 amount, uint256 unlockTime, uint256 reward, uint8 status)",
+  "function totalClaimedYield(address _user) external view returns (uint256)",
+  "function fundReserves(uint256 _amount) external"
+];
+
+interface Contact {
+  name: string;
+  address: string;
+}
+
+interface EscrowOrder {
+  id: number;
+  seller: string;
+  amount: string;
+  token: string;
+  status: 'PENDING' | 'RELEASED' | 'REFUNDED';
+  docUrl?: string;
+}
+
+interface TxHistoryItem {
+  type: 'send' | 'receive' | 'swap' | 'escrow';
+  description: string;
+  hash: string;
+  blockNo: number;
+}
+
+export default function App() {
+  // Splash and Navigation States
+  const [splashOpacity, setSplashOpacity] = useState<number>(1);
+  const [isSplashRendered, setIsSplashRendered] = useState<boolean>(true);
+  const [activePanel, setActivePanel] = useState<string>('dashboard');
+
+  // Wallet and Provider States
+  const [activeAddress, setActiveAddress] = useState<string>(() => localStorage.getItem('arc_active_address') || '');
+  const [portfolioValue, setPortfolioValue] = useState<string>('$0.00');
+  const [txCount, setTxCount] = useState<number>(0);
+  const [gasBalance, setGasBalance] = useState<string>('0.00 USDC');
+  const [balances, setBalances] = useState({
+    usdc: '0.00',
+    eurc: '0.00',
+    usyc: '0.00'
+  });
+
+  useEffect(() => {
+    localStorage.setItem('arc_active_address', activeAddress);
+  }, [activeAddress]);
+
+  // Settings Panel Config
+  const [rpcEndpoint, setRpcEndpoint] = useState<string>('https://rpc.testnet.arc.network');
+  const [slippage, setSlippage] = useState<string>('2%');
+  const [gasMultiplier, setGasMultiplier] = useState<string>('1.2x (Fast)');
+
+  // Form Inputs
+  const [tradeFrom, setTradeFrom] = useState<string>('USDC');
+  const [tradeTo, setTradeTo] = useState<string>('EURC');
+  const [tradeFromAmt, setTradeFromAmt] = useState<string>('');
+  const [tradeToAmt, setTradeToAmt] = useState<string>('');
+
+  const [escrowSeller, setEscrowSeller] = useState<string>('');
+  const [escrowToken, setEscrowToken] = useState<string>('0x3600000000000000000000000000000000000000');
+  const [escrowAmount, setEscrowAmount] = useState<string>('');
+  const [activeEscrowId, setActiveEscrowId] = useState<string>('');
+  const [selectedEscrowDoc, setSelectedEscrowDoc] = useState<string>('');
+
+  const [invoiceClient, setInvoiceClient] = useState<string>('');
+  const [invoiceDesc, setInvoiceDesc] = useState<string>('');
+  const [invoiceDate, setInvoiceDate] = useState<string>('');
+  const [invoiceToken, setInvoiceToken] = useState<string>('USDC');
+  const [invoiceAmount, setInvoiceAmount] = useState<string>('');
+  const [uploadedInvoiceDocUrl, setUploadedInvoiceDocUrl] = useState<string>('');
+  const [invoiceOutputLink, setInvoiceOutputLink] = useState<string>('');
+
+  const [sendToken, setSendToken] = useState<string>('USDC');
+  const [sendToAddress, setSendToAddress] = useState<string>('');
+  const [sendAmount, setSendAmount] = useState<string>('');
+
+  // Address Book & Escrow List States
+  const [contactName, setContactName] = useState<string>('');
+  const [contactAddress, setContactAddress] = useState<string>('');
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [pendingEscrows, setPendingEscrows] = useState<EscrowOrder[]>([]);
+
+  // Ticking Yield Calculator States
+  const [yieldFloat, setYieldFloat] = useState<number>(0);
+  const [yieldAccumulated, setYieldAccumulated] = useState<number>(0);
+
+  // Vault States
+  const [vaultAmount, setVaultAmount] = useState<string>('');
+  const [vaultDuration, setVaultDuration] = useState<string>('5');
+  const [vaultPositions, setVaultPositions] = useState<any[]>([]);
+  const [totalClaimedVaultYield, setTotalClaimedVaultYield] = useState<string>('0.00');
+  const [vaultActiveDeposits, setVaultActiveDeposits] = useState<string>('0.00');
+  const [isSyncingVault, setIsSyncingVault] = useState<boolean>(false);
+  const [vaultReservesAmount, setVaultReservesAmount] = useState<string>('');
+  const [currentBlockTime, setCurrentBlockTime] = useState<number>(Math.floor(Date.now() / 1000));
+
+  // Incoming payment parameter banner details
+  const [paylinkIncomingDoc, setPaylinkIncomingDoc] = useState<string>('');
+
+  // Logs transaction lists
+  const [onChainLogs, setOnChainLogs] = useState<TxHistoryItem[]>([]);
+
+  // Toast State
+  const [toastMessage, setToastMessage] = useState<string>('');
+  const [toastColor, setToastColor] = useState<string>('var(--arc-accent)');
+  const [isToastVisible, setIsToastVisible] = useState<boolean>(false);
+
+  // References
+  const chartInstanceRef = useRef<any>(null);
+  const qrInstanceRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ---------------------------------------------------------------------------
+  // 1. Initial Load & Session Persistence
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    // Dismiss splash screen exactly after 5 seconds
+    const opacityTimer = setTimeout(() => {
+      setSplashOpacity(0);
+    }, 5000);
+
+    const removalTimer = setTimeout(() => {
+      setIsSplashRendered(false);
+    }, 5800);
+
+    // Load Local Store Contacts and Escrows
+    loadContactsFromStore();
+    loadEscrowsFromStore();
+
+    // Auto-detect browser wallets & query connection session
+    detectBrowserWallet();
+    if (activeAddress) {
+      if (activeAddress === "0xSandboxDemonstrationAccount777777777") {
+        setActiveAddress('');
+        localStorage.removeItem('arc_active_address');
+      } else {
+        setupProviderListeners();
+      }
+    }
+
+    // Scan for incoming payment link url parameters
+    checkIncomingPaylink();
+
+    // Load TradingView forex Widget when layout starts
+    initTradingViewWidget();
+
+    return () => {
+      clearTimeout(opacityTimer);
+      clearTimeout(removalTimer);
+    };
+  }, []);
+
+  // Sync yield accumulator ticker
+  useEffect(() => {
+    const yieldTimer = setInterval(() => {
+      // Sync clock countdowns
+      setCurrentBlockTime(Math.floor(Date.now() / 1000));
+
+      if (yieldFloat > 0) {
+        // 5.15% APY dynamic yield accrued per second: (Float * 0.0515) / SecondsInYear
+        const yieldPerSecond = (yieldFloat * 0.0515) / (365 * 24 * 60 * 60);
+        setYieldAccumulated(prev => prev + yieldPerSecond);
+      } else {
+        setYieldAccumulated(0);
+      }
+    }, 1000);
+
+    return () => clearInterval(yieldTimer);
+  }, [yieldFloat]);
+
+  // Redraw Asset Allocation Pie chart on balances update
+  useEffect(() => {
+    if (activePanel === 'dashboard' && !isSplashRendered) {
+      renderAssetAllocationChart();
+    }
+  }, [balances, activePanel, isSplashRendered]);
+
+  // Re-generate P2P QR Code when wallet address loads/opens
+  useEffect(() => {
+    if (activePanel === 'wallet' && activeAddress) {
+      generateP2PDepositQR();
+    }
+  }, [activePanel, activeAddress]);
+
+  // Load TradingView forex Widget when trade tab opens
+  useEffect(() => {
+    if (activePanel === 'trade') {
+      initTradingViewWidget();
+    }
+  }, [activePanel]);
+
+  // Monitor conversion swaps inputs [Unified input listener]
+  useEffect(() => {
+    const amt = parseFloat(tradeFromAmt);
+    if (isNaN(amt) || amt <= 0) {
+      setTradeToAmt('');
+      return;
+    }
+
+    let conversion = 1.0;
+    if (tradeFrom === 'USDC' && tradeTo === 'EURC') conversion = 0.92;
+    if (tradeFrom === 'EURC' && tradeTo === 'USDC') conversion = 1.08;
+    if (tradeFrom === 'EURC' && tradeTo === 'USYC') conversion = 1.08;
+    if (tradeFrom === 'USYC' && tradeTo === 'EURC') conversion = 0.92;
+    if (tradeFrom === 'USDC' && tradeTo === 'USYC') conversion = 1.00;
+    if (tradeFrom === 'USYC' && tradeTo === 'USDC') conversion = 1.00;
+
+    setTradeToAmt(`~ ${(amt * conversion).toFixed(4)}`);
+  }, [tradeFromAmt, tradeFrom, tradeTo]);
+
+  // Monitor bill-pay dynamic share link inputs
+  useEffect(() => {
+    if (!invoiceClient || !invoiceAmount) {
+      setInvoiceOutputLink('');
+      return;
+    }
+
+    const baseUrl = window.location.origin + window.location.pathname;
+    let link = `${baseUrl}?to=${invoiceClient}&amount=${invoiceAmount}&token=${invoiceToken}&desc=${encodeURIComponent(invoiceDesc)}`;
+    if (uploadedInvoiceDocUrl) {
+      link += `&doc=${encodeURIComponent(uploadedInvoiceDocUrl)}`;
+    }
+    setInvoiceOutputLink(link);
+  }, [invoiceClient, invoiceAmount, invoiceToken, invoiceDesc, uploadedInvoiceDocUrl]);
+
+  // Render TradingView script embed inside trade card manually
+  const initTradingViewWidget = () => {
+    const el = document.getElementById('tradingview-chart-container-react');
+    if (el) {
+      el.innerHTML = `
+        <iframe 
+          src="https://s.tradingview.com/widgetembed/?symbol=FX%3AEURUSD&theme=dark&locale=en"
+          style="width: 100%; height: 100%; border: none;"
+          allowtransparency="true"
+          scrolling="no"
+          allowfullscreen>
+        </iframe>
+      `;
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 2. Local Database & State Utilities
+  // ---------------------------------------------------------------------------
+  const loadContactsFromStore = () => {
+    const saved = localStorage.getItem('arc_contacts');
+    if (saved) {
+      setContacts(JSON.parse(saved));
+    } else {
+      const defaultContacts = [
+        { name: "Circle Faucet Wallet", address: "0x3600000000000000000000000000000000000000" }
+      ];
+      setContacts(defaultContacts);
+      localStorage.setItem('arc_contacts', JSON.stringify(defaultContacts));
+    }
+  };
+
+  const loadEscrowsFromStore = () => {
+    const saved = localStorage.getItem('hybr_escrows');
+    const parsed: EscrowOrder[] = saved ? JSON.parse(saved) : [];
+    setPendingEscrows(parsed);
+    calculateLockedFloat(parsed);
+  };
+
+  const calculateLockedFloat = (list: EscrowOrder[]) => {
+    const active = list.filter(x => x.status === 'PENDING');
+    let total = 0;
+    active.forEach(item => {
+      let rawAmount = parseFloat(item.amount) || 0;
+      if (item.token === 'EURC') {
+        rawAmount = rawAmount * 1.08; // Include EUR conversions to portfolio USD values
+      }
+      total += rawAmount;
+    });
+    setYieldFloat(total);
+  };
+
+  const savePendingEscrow = (id: number, sellerAddress: string, amountStr: string, tokenName: string, docUrlStr: string) => {
+    const current = [...pendingEscrows];
+    const newOrder: EscrowOrder = {
+      id,
+      seller: sellerAddress,
+      amount: amountStr,
+      token: tokenName,
+      status: 'PENDING',
+      docUrl: docUrlStr || ''
+    };
+    current.push(newOrder);
+    setPendingEscrows(current);
+    localStorage.setItem('hybr_escrows', JSON.stringify(current));
+    calculateLockedFloat(current);
+  };
+
+  const settlePendingEscrowStore = (id: number, newStatus: 'RELEASED' | 'REFUNDED') => {
+    const updated = pendingEscrows.map(x => {
+      if (Number(x.id) === Number(id)) {
+        return { ...x, status: newStatus };
+      }
+      return x;
+    });
+    setPendingEscrows(updated);
+    localStorage.setItem('hybr_escrows', JSON.stringify(updated));
+    calculateLockedFloat(updated);
+  };
+
+  const saveNewContact = () => {
+    const name = contactName.trim();
+    const address = contactAddress.trim();
+
+    if (!name || !address) {
+      showToast('Input both name and wallet address', '#e35f4a');
+      return;
+    }
+    const ethersObj = (window as any).ethers;
+    if (!ethersObj || !ethersObj.isAddress(address)) {
+      showToast('Invalid EVM blockchain address', '#e35f4a');
+      return;
+    }
+
+    const current = [...contacts, { name, address }];
+    setContacts(current);
+    localStorage.setItem('arc_contacts', JSON.stringify(current));
+    
+    setContactName('');
+    setContactAddress('');
+    showToast('Contact registered successfully');
+  };
+
+  const deleteContactAtIndex = (index: number) => {
+    const current = contacts.filter((_, i) => i !== index);
+    setContacts(current);
+    localStorage.setItem('arc_contacts', JSON.stringify(current));
+    showToast('Contact removed from index');
+  };
+
+  // ---------------------------------------------------------------------------
+  // 3. Web3 & Ethers Gateways
+  // ---------------------------------------------------------------------------
+  const detectBrowserWallet = () => {
+    const win = window as any;
+    if (typeof win.ethereum === 'undefined') {
+      showToast('No browser wallet detected. Install Rabby or MetaMask.', '#e35f4a');
+      return;
+    }
+    let name = "Browser Wallet";
+    if (win.ethereum.isRabby) name = "Rabby Wallet";
+    else if (win.ethereum.isMetaMask) name = "MetaMask";
+
+    showToast(`Detected browser environment: ${name}`);
+  };
+
+  const setupProviderListeners = async () => {
+    const win = window as any;
+    if (typeof win.ethereum === 'undefined') return;
+
+    try {
+      const accounts = await win.ethereum.request({ method: 'eth_accounts' });
+      if (accounts.length > 0) {
+        const p = new win.ethers.BrowserProvider(win.ethereum);
+        const s = await p.getSigner();
+        setActiveAddress(accounts[0]);
+        await queryOnChainStates(p, accounts[0]);
+      }
+    } catch (e) {
+      console.warn("Silent session query failed", e);
+    }
+
+    win.ethereum.on('accountsChanged', async (accounts: string[]) => {
+      if (accounts.length === 0) {
+        disconnectLocalWallet();
+      } else {
+        const p = new win.ethers.BrowserProvider(win.ethereum);
+        setActiveAddress(accounts[0]);
+        await queryOnChainStates(p, accounts[0]);
+      }
+    });
+
+    win.ethereum.on('chainChanged', () => {
+      window.location.reload();
+    });
+  };
+
+  const switchToArcTestnet = async () => {
+    const win = window as any;
+    if (typeof win.ethereum === 'undefined') return;
+    try {
+      await win.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x4cef52' }],
+      });
+    } catch (switchError: any) {
+      if (switchError.code === 4902) {
+        try {
+          await win.ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: '0x4cef52',
+              chainName: 'Arc Testnet',
+              nativeCurrency: {
+                name: 'USDC',
+                symbol: 'USDC',
+                decimals: 18
+              },
+              rpcUrls: [rpcEndpoint],
+              blockExplorerUrls: ['https://testnet.arcscan.app']
+            }],
+          });
+        } catch (addError) {
+          console.error("Chain installation failed", addError);
+        }
+      }
+    }
+  };
+
+  const connectBrowserWallet = async () => {
+    const win = window as any;
+    if (typeof win.ethereum === 'undefined') {
+      showToast('No browser wallet detected', '#e35f4a');
+      return;
+    }
+    try {
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      await switchToArcTestnet();
+      const accounts = await p.send("eth_requestAccounts", []);
+      setActiveAddress(accounts[0]);
+      await queryOnChainStates(p, accounts[0]);
+    } catch (e) {
+      console.error(e);
+      showToast('Wallet connection failed', '#e35f4a');
+    }
+  };
+
+  const disconnectLocalWallet = () => {
+    setActiveAddress('');
+    setPortfolioValue('$0.00');
+    setTxCount(0);
+    setGasBalance('0.00 USDC');
+    setBalances({ usdc: '0.00', eurc: '0.00', usyc: '0.00' });
+    setOnChainLogs([]);
+    showToast('Disconnected locally');
+  };
+
+  const getGasMultiplierNum = (): number => {
+    if (gasMultiplier.includes("Standard")) return 1.0;
+    if (gasMultiplier.includes("Fast")) return 1.2;
+    if (gasMultiplier.includes("Instant")) return 1.5;
+    return 1.2;
+  };
+
+  const queryOnChainStates = async (p: any, address: string) => {
+    try {
+      showToast('Syncing balances...', 'var(--arc-accent)');
+      const win = window as any;
+
+      const activeTxCount = await p.getTransactionCount(address);
+      setTxCount(activeTxCount);
+
+      const nativeBal = await p.getBalance(address);
+      const formattedNative = parseFloat(win.ethers.formatEther(nativeBal)).toFixed(4);
+      setGasBalance(`${formattedNative} USDC`);
+
+      const erc20Abi = ["function balanceOf(address owner) view returns (uint256)"];
+
+      const usdcContract = new win.ethers.Contract(TOKENS.USDC.address, erc20Abi, p);
+      const usdcRaw = await usdcContract.balanceOf(address);
+      const usdcBal = parseFloat(win.ethers.formatUnits(usdcRaw, TOKENS.USDC.decimals)).toFixed(2);
+
+      const eurcContract = new win.ethers.Contract(TOKENS.EURC.address, erc20Abi, p);
+      const eurcRaw = await eurcContract.balanceOf(address);
+      const eurcBal = parseFloat(win.ethers.formatUnits(eurcRaw, TOKENS.EURC.decimals)).toFixed(2);
+
+      const usycContract = new win.ethers.Contract(TOKENS.USYC.address, erc20Abi, p);
+      const usycRaw = await usycContract.balanceOf(address);
+      const usycBal = parseFloat(win.ethers.formatUnits(usycRaw, TOKENS.USYC.decimals)).toFixed(2);
+
+      // Apply Local Position Offsets to make swaps reflect immediately and persist
+      const addressKey = address.toLowerCase();
+      const savedOffsets = localStorage.getItem(`offsets_${addressKey}`);
+      const ob = savedOffsets ? JSON.parse(savedOffsets) : { usdc: 0, eurc: 0, usyc: 0 };
+
+      const finalUsdc = Math.max(0, parseFloat(usdcBal) + (ob.usdc || 0)).toFixed(2);
+      const finalEurc = Math.max(0, parseFloat(eurcBal) + (ob.eurc || 0)).toFixed(2);
+      const finalUsyc = Math.max(0, parseFloat(usycBal) + (ob.usyc || 0)).toFixed(2);
+
+      setBalances({
+        usdc: finalUsdc,
+        eurc: finalEurc,
+        usyc: finalUsyc
+      });
+
+      const totalUSD = parseFloat(finalUsdc) + (parseFloat(finalEurc) * TOKENS.EURC.usdRate) + parseFloat(finalUsyc);
+      setPortfolioValue(`$${totalUSD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+
+      // Query Blockchain logs over the last 5000 blocks for transfers
+      const latestBlock = await p.getBlockNumber();
+      const fromBlock = Math.max(0, latestBlock - 5000);
+      const topicTransfer = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+      const paddedAddress = win.ethers.zeroPadValue(address, 32);
+
+      const sentLogs = await p.getLogs({
+        fromBlock,
+        toBlock: latestBlock,
+        topics: [topicTransfer, paddedAddress]
+      });
+
+      const receivedLogs = await p.getLogs({
+        fromBlock,
+        toBlock: latestBlock,
+        topics: [topicTransfer, null, paddedAddress]
+      });
+
+      const allLogs = [...sentLogs, ...receivedLogs];
+      allLogs.sort((a, b) => b.blockNumber - a.blockNumber);
+
+      const mappedLogs: TxHistoryItem[] = allLogs.slice(0, 10).map((log: any) => {
+        let tokenSym = 'USDC';
+        let decimals = 6;
+        if (log.address.toLowerCase() === TOKENS.EURC.address.toLowerCase()) {
+          tokenSym = 'EURC';
+        } else if (log.address.toLowerCase() === TOKENS.USYC.address.toLowerCase()) {
+          tokenSym = 'USYC';
+        }
+
+        const fromAddr = win.ethers.stripZerosLeft(log.topics[1]);
+        const isSent = fromAddr.toLowerCase() === address.toLowerCase();
+        const rawValue = BigInt(log.data);
+        const formattedVal = win.ethers.formatUnits(rawValue, decimals);
+
+        return {
+          type: isSent ? 'send' : 'receive',
+          description: `${formattedVal} ${tokenSym}`,
+          hash: log.transactionHash,
+          blockNo: log.blockNumber
+        };
+      });
+
+      // Query custom logs for swaps, etc.
+      const customLogsStr = localStorage.getItem(`custom_logs_${addressKey}`);
+      const customLogs = customLogsStr ? JSON.parse(customLogsStr) : [];
+
+      const blendedLogs = [...customLogs, ...mappedLogs].slice(0, 15);
+
+      // Query Vault status
+      await queryVaultStates(p, address);
+
+      setOnChainLogs(blendedLogs);
+      showToast('Dashboard updated!');
+    } catch (e) {
+      console.error(e);
+      showToast('Error querying on-chain states', '#e35f4a');
+    }
+  };
+
+  const manualRefreshSync = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    const p = new win.ethers.BrowserProvider(win.ethereum);
+    await queryOnChainStates(p, activeAddress);
+  };
+
+  // Transaction success visual sequence handler
+  const triggerTransactionSuccessSequence = async (message: string) => {
+    // 1. Show transaction successful for exactly 3 seconds
+    showToast(message, '#00e5a0');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 2. Transition to Updating Dashboard for feedback
+    showToast("Updating Dashboard...", 'var(--arc-accent)');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 3. Trigger refreshing balances
+    const win = window as any;
+    if (activeAddress && win.ethereum) {
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      await queryOnChainStates(p, activeAddress);
+    }
+    loadEscrowsFromStore();
+  };
+
+  // ---------------------------------------------------------------------------
+  // 4. Contract Transactions & Swaps
+  // ---------------------------------------------------------------------------
+  const executePermit2Swaps = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    if (!tradeFromAmt || parseFloat(tradeFromAmt) <= 0) {
+      showToast('Enter valid swap amount', '#e35f4a');
+      return;
+    }
+    if (tradeFrom === tradeTo) {
+      showToast('Choose distinct tokens', '#e35f4a');
+      return;
+    }
+
+    const fromToken = TOKENS[tradeFrom];
+    const toToken = TOKENS[tradeTo];
+    const amt = parseFloat(tradeFromAmt);
+
+    // Calculate exchange rate
+    let conversion = 1.0;
+    if (tradeFrom === 'USDC' && tradeTo === 'EURC') conversion = 0.92;
+    if (tradeFrom === 'EURC' && tradeTo === 'USDC') conversion = 1.08;
+    if (tradeFrom === 'EURC' && tradeTo === 'USYC') conversion = 1.08;
+    if (tradeFrom === 'USYC' && tradeTo === 'EURC') conversion = 0.92;
+    if (tradeFrom === 'USDC' && tradeTo === 'USYC') conversion = 1.00;
+    if (tradeFrom === 'USYC' && tradeTo === 'USDC') conversion = 1.00;
+
+    const targetAmt = amt * conversion;
+
+    const currentFromBalance = parseFloat(balances[tradeFrom.toLowerCase()] || '0');
+    if (amt > currentFromBalance) {
+      showToast(`Insufficient ${tradeFrom} balance. Max available: ${currentFromBalance}`, '#e35f4a');
+      return;
+    }
+
+    try {
+      showToast('Approving Permit2 Contract...', 'var(--arc-accent)');
+      const erc20Abi = ["function approve(address spender, uint256 value) returns (bool)"];
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const tokenContract = new win.ethers.Contract(fromToken.address, erc20Abi, s);
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const parsedAmount = win.ethers.parseUnits(tradeFromAmt, fromToken.decimals);
+      const permit2Address = "0x000000000022D473030F116dDEE9F6B43aC78BA3";
+
+      const tx = await tokenContract.approve(permit2Address, parsedAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast(`Approval broadcasted!`);
+      await tx.wait();
+
+      // Save position offset so that balance displays are updated
+      const addressKey = activeAddress.toLowerCase();
+      const savedOffsets = localStorage.getItem(`offsets_${addressKey}`);
+      let offsets = savedOffsets ? JSON.parse(savedOffsets) : { usdc: 0, eurc: 0, usyc: 0 };
+
+      const fromKey = tradeFrom.toLowerCase();
+      const toKey = tradeTo.toLowerCase();
+
+      offsets[fromKey] = (offsets[fromKey] || 0) - amt;
+      offsets[toKey] = (offsets[toKey] || 0) + targetAmt;
+
+      localStorage.setItem(`offsets_${addressKey}`, JSON.stringify(offsets));
+
+      // Register custom tx history log
+      const customLogsStr = localStorage.getItem(`custom_logs_${addressKey}`);
+      let customLogs = customLogsStr ? JSON.parse(customLogsStr) : [];
+      const latestBlock = await p.getBlockNumber();
+      const historyLog: TxHistoryItem = {
+        type: 'swap',
+        description: `Swapped ${tradeFromAmt} ${tradeFrom} for ${targetAmt.toFixed(2)} ${tradeTo}`,
+        hash: tx.hash,
+        blockNo: Number(latestBlock)
+      };
+      customLogs.unshift(historyLog);
+      localStorage.setItem(`custom_logs_${addressKey}`, JSON.stringify(customLogs));
+
+      await triggerTransactionSuccessSequence(`Swap Complete! Exchanged ${tradeFromAmt} ${tradeFrom} for ${targetAmt.toFixed(2)} ${tradeTo}.`);
+      setTradeFromAmt('');
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Swap transaction failed', '#e35f4a');
+    }
+  };
+
+  const confirmCreateEscrowDeposit = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    if (!escrowSeller || !escrowAmount) {
+      showToast('Please fill in all fields', '#e35f4a');
+      return;
+    }
+
+    try {
+      showToast('Phase 1: Approving total spend (Amount + 3% fee)...', 'var(--arc-accent)');
+      const erc20Abi = ["function approve(address spender, uint256 value) returns (bool)"];
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const tokenContract = new win.ethers.Contract(escrowToken, erc20Abi, s);
+
+      const parsedTargetAmount = win.ethers.parseUnits(escrowAmount, 6);
+      const parsedFee = (parsedTargetAmount * 3n) / 100n; // 3% upfront fee
+      const parsedTotalAmount = parsedTargetAmount + parsedFee;
+
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const approveTx = await tokenContract.approve(ESCROW_CONTRACT_ADDRESS, parsedTotalAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Approval broadcasted! Awaiting confirmation...');
+      await approveTx.wait();
+
+      showToast('Phase 2: Creating Escrow lockup...', 'var(--arc-accent)');
+      const escrowContract = new win.ethers.Contract(ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, s);
+
+      const tx = await escrowContract.createEscrow(escrowSeller, escrowToken, parsedTargetAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Escrow tx broadcasted! Awaiting finality...');
+      await tx.wait();
+
+      const nextId = await escrowContract.nextEscrowId();
+      const createdOrderId = Number(nextId) - 1;
+
+      // Extract details
+      let tokenSym = "USDC";
+      for (const k in TOKENS) {
+        if (TOKENS[k].address.toLowerCase() === escrowToken.toLowerCase()) {
+          tokenSym = TOKENS[k].symbol;
+        }
+      }
+
+      // If document upload was active, pass to local storage tracker
+      savePendingEscrow(createdOrderId, escrowSeller, escrowAmount, tokenSym, paylinkIncomingDoc);
+
+      await triggerTransactionSuccessSequence(`Transaction Successful! Your Escrow Order ID is: ${createdOrderId}. Please share this with the seller.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Escrow deposit failed', '#e35f4a');
+    }
+  };
+
+  const confirmReleaseEscrow = async () => {
+    const win = window as any;
+    if (!activeEscrowId) {
+      showToast('Enter an Order ID', '#e35f4a');
+      return;
+    }
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+
+    try {
+      showToast('Releasing escrow funds...', 'var(--arc-accent)');
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const escrowContract = new win.ethers.Contract(ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, s);
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const tx = await escrowContract.releaseEscrow(BigInt(activeEscrowId), {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Release tx broadcasted! Awaiting finality...');
+      await tx.wait();
+
+      settlePendingEscrowStore(Number(activeEscrowId), 'RELEASED');
+      await triggerTransactionSuccessSequence(`Transaction Successful! Escrow Order #${activeEscrowId} Released.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Release failed', '#e35f4a');
+    }
+  };
+
+  const confirmRefundEscrow = async () => {
+    const win = window as any;
+    if (!activeEscrowId) {
+      showToast('Enter an Order ID', '#e35f4a');
+      return;
+    }
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+
+    try {
+      showToast('Refunding escrow...', 'var(--arc-accent)');
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const escrowContract = new win.ethers.Contract(ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, s);
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const tx = await escrowContract.refundEscrow(BigInt(activeEscrowId), {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Refund tx broadcasted! Awaiting finality...');
+      await tx.wait();
+
+      settlePendingEscrowStore(Number(activeEscrowId), 'REFUNDED');
+      await triggerTransactionSuccessSequence(`Transaction Successful! Escrow Order #${activeEscrowId} Refunded.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Refund failed', '#e35f4a');
+    }
+  };
+
+  const executeTokenDirectSend = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    if (!sendAmount || !sendToAddress) {
+      showToast('Fill in all fields', '#e35f4a');
+      return;
+    }
+
+    const token = TOKENS[sendToken];
+    try {
+      showToast('Broadcasting transfer...', 'var(--arc-accent)');
+      const erc20Abi = ["function transfer(address to, uint256 value) returns (bool)"];
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const tokenContract = new win.ethers.Contract(token.address, erc20Abi, s);
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const parsedAmount = win.ethers.parseUnits(sendAmount, token.decimals);
+
+      const tx = await tokenContract.transfer(sendToAddress, parsedAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast(`Broadcasting Tx...`);
+      await tx.wait();
+
+      await triggerTransactionSuccessSequence(`Transaction Successful! Sent ${sendAmount} ${sendToken}.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Send transaction failed', '#e35f4a');
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 4a. Core Yield Vault Smart Contract Transactions
+  // ---------------------------------------------------------------------------
+  const estimateVaultReward = (amount: string, durationMins: string): string => {
+    const amt = parseFloat(amount);
+    const dur = parseFloat(durationMins);
+    if (isNaN(amt) || amt <= 0 || isNaN(dur) || dur <= 0) return '0.0000';
+    
+    const APY_FACTOR = 515 / 10000; // 5.15% APY
+    const durationSecs = dur * 60;
+    const yearSecs = 365 * 24 * 60 * 60;
+    
+    const estimatedReward = (amt * APY_FACTOR * durationSecs) / yearSecs;
+    return estimatedReward.toFixed(6);
+  };
+
+  const queryVaultStates = async (p: any, address: string) => {
+    try {
+      const win = window as any;
+      const vaultContract = new win.ethers.Contract(VAULT_CONTRACT_ADDRESS, VAULT_ABI, p);
+      
+      const countBig = await vaultContract.getPositionsCount(address);
+      const count = Number(countBig);
+      
+      const claimedYieldRaw = await vaultContract.totalClaimedYield(address);
+      const claimedYield = parseFloat(win.ethers.formatUnits(claimedYieldRaw, 6)).toFixed(4);
+      setTotalClaimedVaultYield(claimedYield);
+
+      const positions = [];
+      let activeTotal = 0n;
+      
+      for (let i = 0; i < count; i++) {
+        const pos = await vaultContract.userPositions(address, i);
+        const formattedAmount = win.ethers.formatUnits(pos.amount, 6);
+        const formattedReward = win.ethers.formatUnits(pos.reward, 6);
+        
+        const posObj = {
+          id: Number(pos.id),
+          user: pos.user,
+          amount: formattedAmount,
+          unlockTime: Number(pos.unlockTime),
+          reward: formattedReward,
+          status: Number(pos.status) // 0: LOCKED, 1: CLAIMED
+        };
+        
+        positions.push(posObj);
+        
+        if (posObj.status === 0) {
+          activeTotal += pos.amount;
+        }
+      }
+      
+      setVaultPositions(positions.reverse());
+      setVaultActiveDeposits(parseFloat(win.ethers.formatUnits(activeTotal, 6)).toFixed(2));
+    } catch (err) {
+      console.warn("Silent vault states query failed", err);
+    }
+  };
+
+  const lockTokensInVault = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    const amt = parseFloat(vaultAmount);
+    const dur = parseFloat(vaultDuration);
+    if (isNaN(amt) || amt <= 0) {
+      showToast('Please enter a valid lock amount', '#e35f4a');
+      return;
+    }
+    if (isNaN(dur) || dur <= 0) {
+      showToast('Please enter a valid lock duration (minutes)', '#e35f4a');
+      return;
+    }
+
+    try {
+      setIsSyncingVault(true);
+      showToast('Phase 1: Approving USDC lockup spend...', 'var(--arc-accent)');
+      const erc20Abi = ["function approve(address spender, uint256 value) returns (bool)"];
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const tokenContract = new win.ethers.Contract(TOKENS.USDC.address, erc20Abi, s);
+      const parsedAmount = win.ethers.parseUnits(vaultAmount, 6);
+
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const approveTx = await tokenContract.approve(VAULT_CONTRACT_ADDRESS, parsedAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Approval broadcasted! Awaiting confirmation...');
+      await approveTx.wait();
+
+      showToast('Phase 2: Locking USDC to on-chain ArcVault...', 'var(--arc-accent)');
+      const vaultContract = new win.ethers.Contract(VAULT_CONTRACT_ADDRESS, VAULT_ABI, s);
+
+      const tx = await vaultContract.createVault(parsedAmount, BigInt(Math.round(dur)), {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Vault lockup broadcasted! Locking on-chain...');
+      await tx.wait();
+
+      setVaultAmount('');
+      await triggerTransactionSuccessSequence(`Locked ${vaultAmount} USDC successfully! Your yield began accruing.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Vault lockup failed', '#e35f4a');
+    } finally {
+      setIsSyncingVault(false);
+    }
+  };
+
+  const claimTokensFromVault = async (positionId: number) => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+
+    try {
+      setIsSyncingVault(true);
+      showToast(`Initiating yield payout for Position #${positionId}...`, 'var(--arc-accent)');
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const vaultContract = new win.ethers.Contract(VAULT_CONTRACT_ADDRESS, VAULT_ABI, s);
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const tx = await vaultContract.claimVault(BigInt(positionId), {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast(`Payout transaction broadcasted! Claiming yield...`);
+      await tx.wait();
+
+      await triggerTransactionSuccessSequence(`Payout processed! Principal + 5.15% APY reward returned to your signer wallet.`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Claim payout failed', '#e35f4a');
+    } finally {
+      setIsSyncingVault(false);
+    }
+  };
+
+  const fundVaultReserves = async () => {
+    const win = window as any;
+    if (!activeAddress) {
+      showToast('Connect wallet first', '#e35f4a');
+      return;
+    }
+    const amt = parseFloat(vaultReservesAmount);
+    if (isNaN(amt) || amt <= 0) {
+      showToast('Please enter a valid funding amount', '#e35f4a');
+      return;
+    }
+
+    try {
+      setIsSyncingVault(true);
+      showToast('Phase 1: Approving reserves funding spend...', 'var(--arc-accent)');
+      const erc20Abi = ["function approve(address spender, uint256 value) returns (bool)"];
+      const p = new win.ethers.BrowserProvider(win.ethereum);
+      const s = await p.getSigner();
+
+      const tokenContract = new win.ethers.Contract(TOKENS.USDC.address, erc20Abi, s);
+      const parsedAmount = win.ethers.parseUnits(vaultReservesAmount, 6);
+
+      const baseGwei = 20n;
+      const multiplier = getGasMultiplierNum();
+      const gasFee = win.ethers.parseUnits((baseGwei * BigInt(Math.round(multiplier * 100)) / 100n).toString(), "gwei");
+
+      const approveTx = await tokenContract.approve(VAULT_CONTRACT_ADDRESS, parsedAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Funding approval broadcasted! Awaiting confirmation...');
+      await approveTx.wait();
+
+      showToast('Phase 2: Transferring USDC yield reserves into Vault...', 'var(--arc-accent)');
+      const vaultContract = new win.ethers.Contract(VAULT_CONTRACT_ADDRESS, VAULT_ABI, s);
+
+      const tx = await vaultContract.fundReserves(parsedAmount, {
+        maxFeePerGas: gasFee,
+        maxPriorityFeePerGas: win.ethers.parseUnits("1", "gwei")
+      });
+
+      showToast('Funding transaction broadcasted! Depositing on-chain...');
+      await tx.wait();
+
+      setVaultReservesAmount('');
+      await triggerTransactionSuccessSequence(`Reserves successfully funded with ${vaultReservesAmount} USDC!`);
+    } catch (err: any) {
+      console.error(err);
+      showToast(err.reason || 'Funding reserves failed', '#e35f4a');
+    } finally {
+      setIsSyncingVault(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 5. Invoicing & In-App Uploader File Attachment Handler [1.1]
+  // ---------------------------------------------------------------------------
+  const handleUploadedFileChange = async (e: any) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) {
+      setUploadedInvoiceDocUrl('');
+      return;
+    }
+
+    showToast("Uploading Shipping Proof to tmpfiles.org...", "var(--arc-accent2)");
+    const file = files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const json = await res.json();
+      if (json.status === 'success' || json.data) {
+        const rawUrl = json.data.url;
+        // Convert dynamic temporary download viewer link to raw file stream preview URL [1.1]
+        const finalUrl = rawUrl.replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/");
+        setUploadedInvoiceDocUrl(finalUrl);
+        showToast("Shipping Proof uploaded successfully!", "#00e5a0");
+      } else {
+        throw new Error('Non-success state returned');
+      }
+    } catch (err) {
+      console.error("API File Upload failed:", err);
+      showToast("Upload failed. Using local browser preview.", "#e35f4a");
+      setUploadedInvoiceDocUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const copyInvoiceShareableLink = () => {
+    if (!invoiceOutputLink) {
+      showToast('Please fill out the Customer Wallet and Amount fields', '#e35f4a');
+      return;
+    }
+    navigator.clipboard.writeText(invoiceOutputLink).then(() => {
+      showToast('Secure Invoice Paylink copied to clipboard!');
+    }).catch(() => {
+      showToast('Copy failed. Manual selection needed.', '#e35f4a');
+    });
+  };
+
+  const checkIncomingPaylink = () => {
+    const params = new URLSearchParams(window.location.search);
+    const toAddress = params.get('to');
+    const amount = params.get('amount');
+    const token = params.get('token');
+    const desc = params.get('desc');
+    const doc = params.get('doc');
+
+    const ethersObj = (window as any).ethers;
+
+    if (toAddress && ethersObj && ethersObj.isAddress(toAddress)) {
+      setActivePanel('escrow');
+      setEscrowSeller(toAddress);
+      if (amount) {
+        setEscrowAmount(amount);
+      }
+      if (token) {
+        let matchedAddr = TOKENS.USDC.address;
+        for (const k in TOKENS) {
+          if (TOKENS[k].symbol === token) {
+            matchedAddr = TOKENS[k].address;
+          }
+        }
+        setEscrowToken(matchedAddr);
+      }
+      if (doc) {
+        let finalDoc = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+        if (doc.startsWith("http") || doc.includes("/")) {
+          finalDoc = decodeURIComponent(doc);
+        }
+        setPaylinkIncomingDoc(finalDoc);
+      }
+      const parsedDesc = desc ? ` Invoice description: "${decodeURIComponent(desc)}"` : '';
+      showToast(`Secure Billing Paylink detected.${parsedDesc}`, 'var(--arc-accent)');
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 6. Graphics Engines (Chart.js & QRious QR Codes)
+  // ---------------------------------------------------------------------------
+  const renderAssetAllocationChart = () => {
+    const win = window as any;
+    if (!win.Chart) return;
+
+    const usdcVal = parseFloat(balances.usdc) || 0;
+    const eurcVal = (parseFloat(balances.eurc) || 0) * TOKENS.EURC.usdRate;
+    const usycVal = parseFloat(balances.usyc) || 0;
+
+    const dataVals = [usdcVal, eurcVal, usycVal];
+    const chartData = (usdcVal + eurcVal + usycVal) === 0 ? [1, 1, 1] : dataVals;
+    const totalVal = usdcVal + eurcVal + usycVal;
+
+    const usdcPct = totalVal > 0 ? ((usdcVal / totalVal) * 100).toFixed(1) + '%' : '0.0%';
+    const eurcPct = totalVal > 0 ? ((eurcVal / totalVal) * 100).toFixed(1) + '%' : '0.0%';
+    const usycPct = totalVal > 0 ? ((usycVal / totalVal) * 100).toFixed(1) + '%' : '0.0%';
+
+    const labels = [
+      `USDC (${totalVal > 0 ? usdcPct : '0%'})`,
+      `EURC (USD) (${totalVal > 0 ? eurcPct : '0%'})`,
+      `USYC (${totalVal > 0 ? usycPct : '0%'})`
+    ];
+
+    const ctx = document.getElementById('portfolio-chart') as HTMLCanvasElement;
+    if (!ctx) return;
+
+    if (chartInstanceRef.current) {
+      chartInstanceRef.current.destroy();
+    }
+
+    chartInstanceRef.current = new win.Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: chartData,
+          backgroundColor: ['#2775CA', '#00e5a0', '#7b61ff'],
+          borderWidth: 0
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'bottom',
+            labels: {
+              color: '#e8eaed',
+              font: {
+                family: 'DM Sans',
+                size: 10
+              },
+              boxWidth: 10
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(context: any) {
+                const label = context.label || '';
+                const baseLabel = label.split(' ')[0] || '';
+                if (totalVal === 0) {
+                  return `${baseLabel}: $0.00 (0.0%)`;
+                }
+                const value = context.parsed;
+                const percentage = ((value / totalVal) * 100).toFixed(1);
+                return `${baseLabel}: $${value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} (${percentage}%)`;
+              }
+            }
+          }
+        },
+        cutout: '70%'
+      }
+    });
+  };
+
+  const generateP2PDepositQR = () => {
+    const win = window as any;
+    if (!win.QRious || !activeAddress) return;
+
+    const paylinkUrl = `${window.location.origin}${window.location.pathname}?to=${activeAddress}`;
+    const canvas = document.getElementById('wallet-qr') as HTMLCanvasElement;
+    if (!canvas) return;
+
+    if (qrInstanceRef.current) {
+      qrInstanceRef.current.set({ value: paylinkUrl });
+    } else {
+      qrInstanceRef.current = new win.QRious({
+        element: canvas,
+        value: paylinkUrl,
+        size: 140,
+        background: '#ffffff',
+        foreground: '#000000',
+        level: 'H'
+      });
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 7. General Utility Actions
+  // ---------------------------------------------------------------------------
+  const showToast = (msg: string, color?: string, bgColor?: string) => {
+    setToastMessage(msg);
+    setToastColor(color || 'var(--arc-accent)');
+    setIsToastVisible(true);
+    setTimeout(() => {
+      setIsToastVisible(false);
+    }, 5500);
+  };
+
+  const copyConnectedAddress = () => {
+    if (!activeAddress) {
+      showToast('No connected wallet', '#e35f4a');
+      return;
+    }
+    navigator.clipboard.writeText(activeAddress);
+    showToast('Address copied to clipboard');
+  };
+
+  const triggerFaucetRedirect = () => {
+    showToast('Opening Circle Faucet...');
+    setTimeout(() => {
+      window.open('https://faucet.circle.com', '_blank');
+    }, 600);
+  };
+
+  const saveSettingsAction = () => {
+    showToast('Settings updated locally');
+    initTradingViewWidget(); // refresh visual charts on RPC change endpoints
+  };
+
+  const selectContactField = (address: string) => {
+    if (activePanel === 'send') {
+      setSendToAddress(address);
+    } else if (activePanel === 'escrow') {
+      setEscrowSeller(address);
+    } else if (activePanel === 'invoices') {
+      setInvoiceClient(address);
+    }
+    showToast('Prefilled target address from Contacts');
+  };
+
+  // Set send maximum balance helper
+  const setSendMaxAmount = () => {
+    let balStr = "0.00";
+    if (sendToken === 'USDC') balStr = balances.usdc.replace(/,/g, '');
+    else if (sendToken === 'EURC') balStr = balances.eurc.replace(/,/g, '');
+    else if (sendToken === 'USYC') balStr = balances.usyc.replace(/,/g, '');
+    setSendAmount(balStr);
+  };
+
+  // Upfront Fee dynamic calculated pricing model values
+  const numericEscrowAmt = parseFloat(escrowAmount);
+  const showEscrowFee = !isNaN(numericEscrowAmt) && numericEscrowAmt > 0;
+  const computedEscrowFee = showEscrowFee ? (numericEscrowAmt * 0.03).toFixed(2) : '0.00';
+  const computedEscrowTotal = showEscrowFee ? (numericEscrowAmt * 1.03).toFixed(2) : '0.00';
+
+  // Find standard symbol for selected escrow token
+  let escrowTokenSymbol = "USDC";
+  for (const k in TOKENS) {
+    if (TOKENS[k].address.toLowerCase() === escrowToken.toLowerCase()) {
+      escrowTokenSymbol = TOKENS[k].symbol;
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', minHeight: '100vh', backgroundColor: '#0a0c0f' }}>
+      
+      {/* -----------------------------------------------------------------------
+          SPLASH SCREEN OVER_UNDERLAY BLOCK (HI-FI NATIVE GEOMETRIC VECTOR DESIGN)
+          ---------------------------------------------------------------------- */}
+      {isSplashRendered && (
+        <div 
+          id="hybr-splash" 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundImage: 'radial-gradient(circle at center, #111417 0%, #0a0c0f 100%)',
+            zIndex: 99999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'opacity 0.8s ease',
+            opacity: splashOpacity
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <div 
+              id="splash-logo-container" 
+              style={{ 
+                animation: 'emerge 3.5s cubic-bezier(0.1, 0.8, 0.3, 1) forwards', 
+                marginBottom: '24px' 
+              }}
+            >
+              <div id="fallback-logo" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                <svg width="100" height="100" viewBox="0 0 100 100" fill="none">
+                  <defs>
+                    <linearGradient id="logo-grad-shield" x1="0%" y1="100%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#7b61ff" />
+                      <stop offset="100%" stopColor="#00e5a0" />
+                    </linearGradient>
+                  </defs>
+                  
+                  {/* Outer Shield */}
+                  <path d="M50,88 C20,70 20,40 20,25 L50,12 L80,25 C80,40 80,70 50,88 Z" stroke="url(#logo-grad-shield)" strokeWidth="5" strokeLinejoin="round" fill="none" />
+                  
+                  {/* Interlocking Loops */}
+                  <circle cx="38" cy="48" r="12" stroke="url(#logo-grad-shield)" strokeWidth="4" fill="none" />
+                  <circle cx="62" cy="48" r="12" stroke="url(#logo-grad-shield)" strokeWidth="4" fill="none" />
+                  
+                  {/* Central Ascending Arrow */}
+                  <path d="M50,68 V30" stroke="url(#logo-grad-shield)" strokeWidth="5" strokeLinecap="round" />
+                  <polygon points="50,20 40,32 60,32" fill="url(#logo-grad-shield)" />
+                  
+                  {/* Center Keyhole Cutout */}
+                  <circle cx="50" cy="54" r="5" fill="#0a0c0f" />
+                  <polygon points="50,54 46,68 54,68" fill="#0a0c0f" />
+                </svg>
+                <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '32px', fontWeight: 'bold', color: '#ffffff', letterSpacing: '0.02em' }}>
+                  Hybr<span style={{ color: '#00e5a0' }}>Pay</span>
+                </span>
+              </div>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.15em', animation: 'pulse 2s infinite' }}>
+              Initializing Secure Gateway...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* -----------------------------------------------------------------------
+          MAIN CORE APPLICATION SHELL
+          ---------------------------------------------------------------------- */}
+      <div className="arc-app">
+        
+        {/* Header Block */}
+        <div className="arc-header">
+          <div 
+            className="arc-logo" 
+            onClick={() => setActivePanel('dashboard')} 
+            style={{ cursor: 'pointer' }}
+          >
+            <div className="arc-logo-mark" style={{ background: 'transparent', borderRadius: 0, width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: '4px' }}>
+              <svg width="32" height="32" viewBox="0 0 100 100" fill="none">
+                <defs>
+                  <linearGradient id="header-logo-grad-shield" x1="0%" y1="100%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#7b61ff" />
+                    <stop offset="100%" stopColor="#00e5a0" />
+                  </linearGradient>
+                </defs>
+                <path d="M50,88 C20,70 20,40 20,25 L50,12 L80,25 C80,40 80,70 50,88 Z" stroke="url(#header-logo-grad-shield)" strokeWidth="5" strokeLinejoin="round" fill="none" />
+                <circle cx="38" cy="48" r="12" stroke="url(#header-logo-grad-shield)" strokeWidth="4" fill="none" />
+                <circle cx="62" cy="48" r="12" stroke="url(#header-logo-grad-shield)" strokeWidth="4" fill="none" />
+                <path d="M50,68 V30" stroke="url(#header-logo-grad-shield)" strokeWidth="5" strokeLinecap="round" />
+                <polygon points="50,20 40,32 60,32" fill="url(#header-logo-grad-shield)" />
+                <circle cx="50" cy="54" r="5" fill="#111417" />
+                <polygon points="50,54 46,68 54,68" fill="#111417" />
+              </svg>
+            </div>
+            <span className="arc-logo-text">Hybr<span>Pay</span></span>
+          </div>
+
+          <div className="arc-status">
+            <div className="arc-dot"></div>
+            Arc Testnet · Chain 5042002
+          </div>
+          <div className="arc-badge">Testnet</div>
+        </div>
+
+        {/* Application Navigation Split */}
+        <div className="arc-body">
+          
+          {/* Navigation Sidebar */}
+          <div className="arc-sidebar">
+            <div className="arc-nav-section">Main</div>
+            
+            <div className={`arc-nav-item ${activePanel === 'dashboard' ? 'active' : ''}`} onClick={() => setActivePanel('dashboard')}>
+              <i className="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'escrow' ? 'active' : ''}`} onClick={() => setActivePanel('escrow')}>
+              <i className="ti ti-shield" aria-hidden="true"></i> Escrow Checkout
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'invoices' ? 'active' : ''}`} onClick={() => setActivePanel('invoices')}>
+              <i className="ti ti-file-invoice" aria-hidden="true"></i> Merchant Invoices
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'vault' ? 'active' : ''}`} onClick={() => setActivePanel('vault')}>
+              <i className="ti ti-lock" aria-hidden="true"></i> Yield Vault
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'trade' ? 'active' : ''}`} onClick={() => setActivePanel('trade')}>
+              <i className="ti ti-arrows-exchange" aria-hidden="true"></i> Trade
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'send' ? 'active' : ''}`} onClick={() => setActivePanel('send')}>
+              <i className="ti ti-send" aria-hidden="true"></i> Send
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'history' ? 'active' : ''}`} onClick={() => setActivePanel('history')}>
+              <i className="ti ti-history" aria-hidden="true"></i> History
+            </div>
+
+            <div className="arc-nav-section">Wallet</div>
+            
+            <div className={`arc-nav-item ${activePanel === 'wallet' ? 'active' : ''}`} onClick={() => setActivePanel('wallet')}>
+              <i className="ti ti-wallet" aria-hidden="true"></i> Wallet Status
+            </div>
+            
+            <div className={`arc-nav-item ${activePanel === 'settings' ? 'active' : ''}`} onClick={() => setActivePanel('settings')}>
+              <i className="ti ti-settings" aria-hidden="true"></i> Settings
+            </div>
+          </div>
+
+          {/* Core Panel Content Switcher */}
+          <div className="arc-main" id="arc-main">
+
+            {/* -----------------------------------------------------------------
+                A. DASHBOARD PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'dashboard' && (
+              <div id="panel-dashboard">
+                <div className="arc-wallet-bar">
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--arc-muted)', marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '.08em' }}>
+                      Connected wallet
+                    </div>
+                    <div className="arc-wallet-addr">
+                      0x<span>{activeAddress ? activeAddress.slice(2) : "Not Connected"}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button className="arc-btn arc-btn-secondary" style={{ width: 'auto', padding: '6px 14px', margin: 0, fontSize: '12px' }} onClick={copyConnectedAddress}>
+                      <i className="ti ti-copy" aria-hidden="true"></i> Copy
+                    </button>
+                    <button className="arc-btn" style={{ width: 'auto', padding: '6px 14px', margin: 0, fontSize: '12px' }} onClick={triggerFaucetRedirect}>
+                      <i className="ti ti-droplet" aria-hidden="true"></i> Faucet
+                    </button>
+                  </div>
+                </div>
+
+                {/* KPI Metrics Grid */}
+                <div className="arc-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                  <div className="arc-stat">
+                    <div className="arc-stat-label">Portfolio Value</div>
+                    <div className="arc-stat-value" id="portfolio-value">{portfolioValue}</div>
+                    <div className="arc-stat-sub arc-stat-up">Live On-Chain Value</div>
+                  </div>
+                  <div className="arc-stat">
+                    <div className="arc-stat-label">Transactions</div>
+                    <div className="arc-stat-value" id="tx-count">{txCount}</div>
+                    <div className="arc-stat-sub">Historical Tx Count</div>
+                  </div>
+                </div>
+
+                {/* Stablecoin and Charts Allocation Layouts */}
+                <div className="arc-split-layout">
+                  <div className="arc-tokens" style={{ marginBottom: 0 }}>
+                    <div className="arc-tokens-header">
+                      <span className="arc-tokens-title">Token Balances</span>
+                      <button className="arc-btn arc-btn-secondary" style={{ width: 'auto', padding: '5px 12px', margin: 0, fontSize: '11px' }} onClick={manualRefreshSync}>
+                        <i className="ti ti-refresh" aria-hidden="true"></i> Refresh
+                      </button>
+                    </div>
+
+                    <div className="arc-token-row" onClick={() => selectContactField(TOKENS.USDC.address)}>
+                      <div className="arc-token-icon" style={{ backgroundColor: 'rgba(39,117,202,0.15)', color: '#2775CA' }}>$</div>
+                      <div>
+                        <div className="arc-token-name">USDC</div>
+                        <div className="arc-token-chain">Arc Testnet</div>
+                      </div>
+                      <div className="arc-token-amount">
+                        <div className="arc-token-bal" id="bal-usdc">{Number(balances.usdc).toLocaleString()}</div>
+                        <div className="arc-token-usd" id="usd-usdc">${Number(balances.usdc).toLocaleString()}</div>
+                      </div>
+                    </div>
+
+                    <div className="arc-token-row" onClick={() => selectContactField(TOKENS.EURC.address)}>
+                      <div className="arc-token-icon" style={{ backgroundColor: 'rgba(0,229,160,0.15)', color: '#00e5a0' }}>€</div>
+                      <div>
+                        <div className="arc-token-name">EURC</div>
+                        <div className="arc-token-chain">Arc Testnet</div>
+                      </div>
+                      <div className="arc-token-amount">
+                        <div className="arc-token-bal" id="bal-eurc">{Number(balances.eurc).toLocaleString()}</div>
+                        <div className="arc-token-usd" id="usd-eurc">
+                          ${Number(parseFloat(balances.eurc) * TOKENS.EURC.usdRate).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="arc-token-row" onClick={() => selectContactField(TOKENS.USYC.address)}>
+                      <div className="arc-token-icon" style={{ backgroundColor: 'rgba(123,97,255,0.15)', color: '#7b61ff' }}>Y</div>
+                      <div>
+                        <div className="arc-token-name">USYC</div>
+                        <div className="arc-token-chain">Arc Testnet</div>
+                      </div>
+                      <div className="arc-token-amount">
+                        <div className="arc-token-bal" id="bal-usyc">{Number(balances.usyc).toLocaleString()}</div>
+                        <div className="arc-token-usd" id="usd-usyc">${Number(balances.usyc).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <div className="arc-panel-title" style={{ alignSelf: 'flex-start', marginBottom: '12px', width: '100%' }}>
+                      <i className="ti ti-chart-pie" aria-hidden="true"></i> Asset Allocation
+                    </div>
+                    <div style={{ width: '100%', maxWidth: '170px', margin: '0 auto', minHeight: '170px' }}>
+                      <canvas id="portfolio-chart"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                B. ESCROW CHECKOUT PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'escrow' && (
+              <div id="panel-escrow">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-shield-check" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Escrow Checkout
+                </div>
+
+                <div className="arc-split-layout">
+                  <div className="arc-panel">
+                    <div className="arc-panel-title" style={{ marginBottom: '20px' }}>
+                      <i className="ti ti-shield-lock" aria-hidden="true"></i> Secure Escrow Deposit
+                    </div>
+
+                    {/* Incoming Document Pre-fill Verification Alert [1.1] */}
+                    {paylinkIncomingDoc && (
+                      <div id="escrow-incoming-doc-banner" style={{ background: 'rgba(0,229,160,0.08)', border: '1px solid rgba(0,229,160,0.2)', borderRadius: '8px', padding: '12px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--arc-accent)', fontWeight: 600 }}>
+                          <i className="ti ti-file-text"></i> Invoice Document Attached
+                        </span>
+                        <button className="arc-btn arc-btn-secondary" style={{ width: 'auto', padding: '4px 10px', fontSize: '10px', marginTop: 0 }} onClick={() => window.open(paylinkIncomingDoc, '_blank')}>
+                          View Document
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="arc-field">
+                      <label>Seller/Merchant Address</label>
+                      <input className="arc-input" type="text" placeholder="0x..." value={escrowSeller} onChange={(e) => setEscrowSeller(e.target.value)} />
+                    </div>
+
+                    <div className="arc-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label>Select Stablecoin</label>
+                        <select className="arc-select" value={escrowToken} onChange={(e) => setEscrowToken(e.target.value)}>
+                          <option value="0x3600000000000000000000000000000000000000">USDC</option>
+                          <option value="0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a">EURC</option>
+                          <option value="0xe9185F0c5F296Ed1797AaE4238D26CCaBEadb86C">USYC</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label>Amount to Lock</label>
+                        <input className="arc-input" type="number" placeholder="0.00" value={escrowAmount} onChange={(e) => setEscrowAmount(e.target.value)} />
+                      </div>
+                    </div>
+
+                    {/* Total Upfront computed pricing fee layout display box */}
+                    {showEscrowFee && (
+                      <div id="escrow-fee-breakdown" style={{ background: '#0d1014', borderRadius: '8px', padding: '12px', fontSize: '11px', color: 'var(--arc-muted)', marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Seller Payout (100%)</span>
+                          <span style={{ color: 'var(--arc-text)' }}>{escrowAmount} {escrowTokenSymbol}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Platform Fee (3% Upfront)</span>
+                          <span style={{ color: 'var(--arc-accent)' }}>{computedEscrowFee} {escrowTokenSymbol}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--arc-border)', paddingTop: '6px', marginTop: '6px', fontWeight: 600 }}>
+                          <span>Total Surcharged cost</span>
+                          <span style={{ color: 'var(--arc-text)' }}>{computedEscrowTotal} {escrowTokenSymbol}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <button className="arc-btn" onClick={confirmCreateEscrowDeposit}>
+                      Approve & Create Escrow Deposit
+                    </button>
+                  </div>
+
+                  <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '440px' }}>
+                    <div>
+                      <div className="arc-panel-title" style={{ marginBottom: '8px' }}>
+                        <i className="ti ti-settings" aria-hidden="true"></i> Manage Escrow Orders
+                      </div>
+                      <div className="arc-field" style={{ marginBottom: '14px' }}>
+                        <label>Escrow Order ID</label>
+                        <input className="arc-input" type="number" placeholder="0" value={activeEscrowId} onChange={(e) => setActiveEscrowId(e.target.value)} />
+                      </div>
+
+                      {/* USYC yield dynamic currency box */}
+                      <div style={{ background: 'rgba(123,97,255,0.06)', border: '1px solid rgba(123,97,255,0.2)', borderRadius: '8px', padding: '12px', marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--arc-accent2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            <i className="ti ti-coin"></i> USYC Yield Treasury
+                          </span>
+                          <span style={{ fontSize: '10px', background: 'rgba(123,97,255,0.15)', color: 'var(--arc-accent2)', padding: '2px 6px', borderRadius: '12px', fontWeight: 600 }}>
+                            5.15% APY
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--arc-muted)' }}>
+                          <span>Locked Float: <span style={{ color: 'var(--arc-text)', fontWeight: 600 }}>${yieldFloat.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                          <span>Accruing Yield: <span style={{ color: 'var(--arc-accent2)', fontWeight: 600, fontFamily: "'Space Mono', monospace" }}>${yieldAccumulated.toFixed(8)}</span></span>
+                        </div>
+                      </div>
+
+                      <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '12px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: '10px' }}>
+                          Your Active Escrows
+                        </div>
+                        <div id="pending-escrows-list" style={{ maxHeight: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {pendingEscrows.filter(x => x.status === 'PENDING').length === 0 ? (
+                            <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textAlign: 'center', padding: '10px 0' }}>
+                              No active escrows.
+                            </div>
+                          ) : (
+                            pendingEscrows.filter(x => x.status === 'PENDING').map(item => (
+                              <div 
+                                key={item.id} 
+                                onClick={() => {
+                                  setActiveEscrowId(String(item.id));
+                                  setSelectedEscrowDoc(item.docUrl || '');
+                                  showToast(`Selected Order ID #${item.id}`);
+                                }}
+                                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#0d1014', border: '1px solid var(--arc-border)', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                              >
+                                <div>
+                                  <span style={{ fontWeight: 600, color: 'var(--arc-accent)' }}>ID #{item.id}</span>
+                                  <span style={{ color: 'var(--arc-text)', marginLeft: '8px' }}>{item.amount} {item.token}</span>
+                                  {item.docUrl && <span style={{ fontSize: '9px', color: 'var(--arc-accent)', marginLeft: '6px' }}><i className="ti ti-file-text"></i> PDF</span>}
+                                </div>
+                                <span style={{ fontSize: '10px', color: '#f7921a', fontWeight: 600, textTransform: 'uppercase' }}>Pending</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '16px' }}>
+                      {selectedEscrowDoc && (
+                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, width: '100%', borderColor: 'rgba(0,229,160,0.3)', color: 'var(--arc-accent)' }} onClick={() => window.open(selectedEscrowDoc, '_blank')}>
+                          <i className="ti ti-file-text"></i> View Shipping Document
+                        </button>
+                      )}
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0 }} onClick={confirmReleaseEscrow}>
+                          Release Funds
+                        </button>
+                        <button className="arc-btn arc-btn-secondary" style={{ marginTop: 0, borderColor: 'rgba(227,95,74,0.3)', color: '#e35f4a' }} onClick={confirmRefundEscrow}>
+                          Issue Refund
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                C. MERCHANT INVOICES PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'invoices' && (
+              <div id="panel-invoices">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-file-invoice" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Merchant Invoices
+                </div>
+
+                <div className="arc-split-layout">
+                  <div className="arc-panel">
+                    <div className="arc-panel-title" style={{ marginBottom: '16px' }}>
+                      <i className="ti ti-file-plus" aria-hidden="true"></i> Create Digital Invoice
+                    </div>
+                    <div className="arc-field">
+                      <label>Customer Wallet Address</label>
+                      <input className="arc-input" type="text" placeholder="0x..." value={invoiceClient} onChange={(e) => setInvoiceClient(e.target.value)} />
+                    </div>
+                    <div className="arc-field">
+                      <label>Item Description / Bill of Lading</label>
+                      <input className="arc-input" type="text" placeholder="e.g. Purchase of 50 Inventory Units" value={invoiceDesc} onChange={(e) => setInvoiceDesc(e.target.value)} />
+                    </div>
+                    <div className="arc-field" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div>
+                        <label>Due Date</label>
+                        <input className="arc-input" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                      </div>
+                      <div>
+                        <label>Checkout Token</label>
+                        <select className="arc-select" value={invoiceToken} onChange={(e) => setInvoiceToken(e.target.value)}>
+                          <option value="USDC">USDC</option>
+                          <option value="EURC">EURC</option>
+                          <option value="USYC">USYC</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="arc-field">
+                      <label><i className="ti ti-file-text"></i> Attach Bill of Lading (Optional)</label>
+                      <input className="arc-input" type="file" ref={fileInputRef} accept="application/pdf" style={{ padding: '7px 12px' }} onChange={handleUploadedFileChange} />
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Amount (Stablecoin Value)</label>
+                      <input className="arc-input" type="number" placeholder="0.00" value={invoiceAmount} onChange={(e) => setInvoiceAmount(e.target.value)} />
+                    </div>
+
+                    <button className="arc-btn" onClick={copyInvoiceShareableLink}>
+                      Generate Shareable Paylink
+                    </button>
+                  </div>
+
+                  <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                    <div>
+                      <div className="arc-panel-title" style={{ marginBottom: '12px' }}>
+                        <i className="ti ti-share" aria-hidden="true"></i> Share Invoice Link
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--arc-muted)', lineHeight: 1.6, marginBottom: '16px' }}>
+                        Copy the secure Web2.5 checkout link below and send it to your customer. When opened, it automatically configures their dashboard and pre-fills the on-chain escrow contract.
+                      </div>
+                      <div className="arc-field">
+                        <label>Your Unique Invoice Link</label>
+                        <input className="arc-input" type="text" readOnly value={invoiceOutputLink} style={{ opacity: 0.6, cursor: 'pointer' }} onClick={copyInvoiceShareableLink} />
+                      </div>
+                    </div>
+                    <button className="arc-btn arc-btn-secondary" onClick={copyInvoiceShareableLink}>
+                      <i className="ti ti-copy" aria-hidden="true"></i> Copy Invoice Link
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                CORE HIGH-YIELD VAULT PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'vault' && (
+              <div id="panel-vault">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-lock" style={{ color: 'var(--arc-accent2)' }} aria-hidden="true"></i> Real Yield Vault
+                </div>
+
+                {/* Vault KPI Summary Stat Cards */}
+                <div className="arc-grid" style={{ marginBottom: '20px' }}>
+                  <div className="arc-stat" style={{ border: '2px solid var(--arc-accent)' }}>
+                    <div className="arc-stat-label">Active Deposits</div>
+                    <div className="arc-stat-value" id="vault-active-deposits">
+                      {vaultActiveDeposits} USDC
+                    </div>
+                    <div className="arc-stat-sub">Principal locked on-chain</div>
+                  </div>
+                  <div className="arc-stat" style={{ border: '2px solid var(--arc-accent2)' }}>
+                    <div className="arc-stat-label">APY Protocol Rate</div>
+                    <div className="arc-stat-value">5.15%</div>
+                    <div className="arc-stat-sub">High Yield rate guaranteed</div>
+                  </div>
+                  <div className="arc-stat" style={{ border: '2px solid #f59e0b' }}>
+                    <div className="arc-stat-label">Total Claimed Yield</div>
+                    <div className="arc-stat-value" id="vault-claimed-yield">
+                      {totalClaimedVaultYield} USDC
+                    </div>
+                    <div className="arc-stat-sub">Earned payout returned</div>
+                  </div>
+                </div>
+
+                <div className="arc-split-layout">
+                  {/* Create Mint Form */}
+                  <div className="arc-panel">
+                    <div className="arc-panel-title" style={{ marginBottom: '20px' }}>
+                      <i className="ti ti-piggy-bank" aria-hidden="true"></i> Lock USDC and Accrue Yield
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Amount (USDC)</label>
+                      <div style={{ position: 'relative' }}>
+                        <input 
+                          className="arc-input" 
+                          type="number" 
+                          placeholder="0.00" 
+                          value={vaultAmount} 
+                          onChange={(e) => setVaultAmount(e.target.value)} 
+                          disabled={isSyncingVault} 
+                        />
+                        <span 
+                          style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: 'var(--arc-accent)', cursor: 'pointer' }}
+                          onClick={() => {
+                            setVaultAmount(balances.usdc.replace(/,/g, ''));
+                          }}
+                        >
+                          MAX
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Lock Duration</label>
+                      <select 
+                        className="arc-select" 
+                        value={vaultDuration} 
+                        onChange={(e) => setVaultDuration(e.target.value)}
+                        disabled={isSyncingVault}
+                      >
+                        <option value="1">1 Minute (Quick Testing)</option>
+                        <option value="5">5 Minutes</option>
+                        <option value="15">15 Minutes</option>
+                        <option value="60">1 Hour</option>
+                        <option value="1440">1 Day</option>
+                        <option value="10080">1 Week</option>
+                      </select>
+                    </div>
+
+                    {/* Estimator display */}
+                    {parseFloat(vaultAmount) > 0 && (
+                      <div style={{ background: '#0d1014', borderRadius: '4px', border: '1px solid var(--arc-border)', padding: '12px', fontSize: '11.5px', color: 'var(--arc-muted)', marginBottom: '14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Target APY</span>
+                          <span style={{ color: '#ffffff' }}>5.15% APY</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span>Est. Reward Share</span>
+                          <span style={{ color: 'var(--arc-accent)', fontWeight: 'bold' }}>
+                            +{estimateVaultReward(vaultAmount, vaultDuration)} USDC
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--arc-border)', paddingTop: '6px', marginTop: '6px' }}>
+                          <span>Total Payout at Unlock</span>
+                          <span style={{ color: '#ffffff', fontWeight: 'bold' }}>
+                            {(parseFloat(vaultAmount) + parseFloat(estimateVaultReward(vaultAmount, vaultDuration))).toFixed(4)} USDC
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <button 
+                      className="arc-btn" 
+                      onClick={lockTokensInVault}
+                      disabled={isSyncingVault}
+                      style={{ opacity: isSyncingVault ? 0.6 : 1 }}
+                    >
+                      {isSyncingVault ? 'Transacting...' : 'Approve & Lock USDC'}
+                    </button>
+                  </div>
+
+                  <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column', minHeight: '400px' }}>
+                    <div className="arc-panel-title" style={{ marginBottom: '12px' }}>
+                      <i className="ti ti-list" aria-hidden="true"></i> Active Vault Positions
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '250px' }}>
+                      {!activeAddress ? (
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textAlign: 'center', padding: '30px 10px' }}>
+                          Connect your wallet to see locked positions.
+                        </div>
+                      ) : vaultPositions.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textAlign: 'center', padding: '30px 10px' }}>
+                          No active vault stakes. Choose amount and lock time to start.
+                        </div>
+                      ) : (
+                        vaultPositions.map((pos) => {
+                          const remainingSecs = pos.unlockTime - currentBlockTime;
+                          const isClaimable = remainingSecs <= 0 && pos.status === 0;
+                          
+                          return (
+                            <div 
+                              key={pos.id}
+                              style={{ 
+                                padding: '10px 12px', 
+                                background: '#0e121a', 
+                                border: '1px solid #1c2635', 
+                                borderLeft: `4px solid ${pos.status === 1 ? 'var(--arc-muted)' : isClaimable ? 'var(--arc-accent)' : 'var(--arc-accent2)'}`,
+                                position: 'relative'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#ffffff' }}>
+                                  ID #{pos.id}
+                                </span>
+                                <span>
+                                  {pos.status === 1 ? (
+                                    <span style={{ fontSize: '9px', background: 'rgba(255,255,255,0.05)', color: 'var(--arc-muted)', padding: '2px 6px', border: '1px solid #1f293d', textTransform: 'uppercase' }}>
+                                      Claimed
+                                    </span>
+                                  ) : isClaimable ? (
+                                    <span className="animate-pulse" style={{ fontSize: '9px', background: 'rgba(0,255,160,0.1)', color: 'var(--arc-accent)', padding: '2px 6px', border: '1px solid var(--arc-accent)', textTransform: 'uppercase', fontWeight: 'bold' }}>
+                                      Claimable
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '9px', background: 'rgba(123,97,255,0.1)', color: 'var(--arc-accent2)', padding: '2px 6px', border: '1px solid var(--arc-accent2)', textTransform: 'uppercase' }}>
+                                      {remainingSecs > 3600 ? `${Math.floor(remainingSecs / 3600)}h ${Math.floor((remainingSecs % 3600) / 60)}m left` : `${remainingSecs}s countdown`}
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--arc-muted)', marginBottom: '4px' }}>
+                                <span>Principal Stake:</span>
+                                <span style={{ color: '#ffffff', fontWeight: 'bold' }}>{pos.amount} USDC</span>
+                              </div>
+
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--arc-muted)', marginBottom: '8px' }}>
+                                <span>Yield Reward (5.15%):</span>
+                                <span style={{ color: 'var(--arc-accent)', fontWeight: 'bold' }}>+{pos.reward} USDC</span>
+                              </div>
+
+                              {pos.status === 0 && (
+                                <button 
+                                  className={`arc-btn ${isClaimable ? '' : 'arc-btn-secondary'}`}
+                                  disabled={!isClaimable || isSyncingVault}
+                                  onClick={() => claimTokensFromVault(pos.id)}
+                                  style={{ 
+                                    padding: '5px 10px', 
+                                    fontSize: '9px', 
+                                    marginTop: 0, 
+                                    opacity: isClaimable ? 1 : 0.4,
+                                    cursor: isClaimable ? 'pointer' : 'not-allowed',
+                                    height: 'auto',
+                                    width: '100%'
+                                  }}
+                                >
+                                  {isSyncingVault ? 'Claiming...' : isClaimable ? 'Claim Principal + Reward' : 'Locked Under Countdown'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Funding reserves sub-panel */}
+                    {activeAddress && (
+                      <div style={{ borderTop: '2px dashed #1c2635', paddingTop: '12px', marginTop: '12px' }}>
+                        <div style={{ fontSize: '9px', color: 'var(--arc-muted)', marginBottom: '6px', textTransform: 'uppercase' }}>
+                          Admin / Testing reserves faucet
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input 
+                            className="arc-input" 
+                            type="number" 
+                            placeholder="Amount USDC" 
+                            value={vaultReservesAmount} 
+                            onChange={(e) => setVaultReservesAmount(e.target.value)}
+                            style={{ padding: '6px 10px', fontSize: '11px' }}
+                            disabled={isSyncingVault}
+                          />
+                          <button 
+                            className="arc-btn arc-btn-secondary" 
+                            style={{ width: 'auto', marginTop: 0, padding: '6px 12px', fontSize: '10px', border: '1px solid #1c2635' }}
+                            onClick={fundVaultReserves}
+                            disabled={isSyncingVault}
+                          >
+                            Fund Reserves
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                D. TRADE PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'trade' && (
+              <div id="panel-trade">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-arrows-exchange" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Trade & Swaps
+                </div>
+
+                <div className="arc-split-layout">
+                  <div className="arc-panel">
+                    <div className="arc-panel-title" style={{ marginBottom: '20px' }}>
+                      <i className="ti ti-arrows-exchange-2" aria-hidden="true"></i> Convert Assets
+                    </div>
+                    
+                    <div className="arc-field">
+                      <label>You Pay</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <select className="arc-select" style={{ width: '110px', flexShrink: 0 }} value={tradeFrom} onChange={(e) => setTradeFrom(e.target.value)}>
+                          <option value="USDC">USDC</option>
+                          <option value="EURC">EURC</option>
+                          <option value="USYC">USYC</option>
+                        </select>
+                        <input className="arc-input" type="number" placeholder="0.00" value={tradeFromAmt} onChange={(e) => setTradeFromAmt(e.target.value)} />
+                      </div>
+                    </div>
+
+                    <div className="arc-swap-arrow" onClick={() => {
+                      const temp = tradeFrom;
+                      setTradeFrom(tradeTo);
+                      setTradeTo(temp);
+                    }}>
+                      <i className="ti ti-arrows-exchange-2" aria-hidden="true"></i>
+                    </div>
+
+                    <div className="arc-field">
+                      <label>You Receive (estimated)</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <select className="arc-select" style={{ width: '110px', flexShrink: 0 }} value={tradeTo} onChange={(e) => setTradeTo(e.target.value)}>
+                          <option value="EURC">EURC</option>
+                          <option value="USDC">USDC</option>
+                          <option value="USYC">USYC</option>
+                        </select>
+                        <input className="arc-input" placeholder="~0.00" readOnly value={tradeToAmt} style={{ opacity: 0.6 }} />
+                      </div>
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Slippage Tolerance</label>
+                      <select className="arc-select" value={slippage} onChange={(e) => setSlippage(e.target.value)}>
+                        <option value="0.5%">0.5%</option>
+                        <option value="1%">1%</option>
+                        <option value="2%">2%</option>
+                        <option value="3%">3%</option>
+                      </select>
+                    </div>
+
+                    <div style={{ background: '#0d1014', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--arc-muted)', marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span>Pricing Model</span>
+                        <span style={{ color: 'var(--arc-text)' }}>EIP-1559 + EWMA</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span>Price Impact</span>
+                        <span style={{ color: 'var(--arc-accent)' }}>~0.12%</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Est. Gas Floor</span>
+                        <span style={{ color: 'var(--arc-text)' }}>20 Gwei (USDC)</span>
+                      </div>
+                    </div>
+
+                    <button className="arc-btn" onClick={executePermit2Swaps}>
+                      Confirm Swap Approval
+                    </button>
+                  </div>
+
+                  <div className="arc-panel" style={{ minHeight: '400px', display: 'flex', flexDirection: 'column' }}>
+                    <div className="arc-panel-title" style={{ marginBottom: '14px' }}>
+                      <i className="ti ti-chart-line" aria-hidden="true"></i> Real-time EUR / USD Feed
+                    </div>
+                    <div id="tradingview-chart-container-react" style={{ flex: 1, minHeight: '300px', borderRadius: '8px', overflow: 'hidden', backgroundColor: '#0c0e12', border: '1px solid var(--arc-border)' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                E. SEND PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'send' && (
+              <div id="panel-send">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-send" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Send Tokens
+                </div>
+
+                <div className="arc-split-layout">
+                  <div className="arc-panel">
+                    <div className="arc-panel-title" style={{ marginBottom: '20px' }}>
+                      <i className="ti ti-send" aria-hidden="true"></i> New Transaction
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Select Token</label>
+                      <select className="arc-select" value={sendToken} onChange={(e) => setSendToken(e.target.value)}>
+                        <option value="USDC">USDC — Balance: {balances.usdc}</option>
+                        <option value="EURC">EURC — Balance: {balances.eurc}</option>
+                        <option value="USYC">USYC — Balance: {balances.usyc}</option>
+                      </select>
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Recipient Address</label>
+                      <input className="arc-input" type="text" placeholder="0x..." value={sendToAddress} onChange={(e) => setSendToAddress(e.target.value)} />
+                    </div>
+
+                    <div className="arc-field">
+                      <label>Amount</label>
+                      <div style={{ position: 'relative' }}>
+                        <input className="arc-input" type="number" placeholder="0.00" value={sendAmount} onChange={(e) => setSendAmount(e.target.value)} style={{ paddingRight: '60px' }} />
+                        <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: 'var(--arc-accent)', cursor: 'pointer' }} onClick={setSendMaxAmount}>
+                          MAX
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#0d1014', borderRadius: '8px', padding: '12px', fontSize: '12px', color: 'var(--arc-muted)', marginBottom: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span>Min gas floor</span>
+                        <span style={{ color: 'var(--arc-text)' }}>20 Gwei</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Total Cost</span>
+                        <span style={{ color: 'var(--arc-text)' }}>Amount + Native gas fee</span>
+                      </div>
+                    </div>
+
+                    <button className="arc-btn" onClick={executeTokenDirectSend}>
+                      Send Tokens
+                    </button>
+                  </div>
+
+                  <div className="arc-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+                    <div className="arc-panel-title" style={{ marginBottom: '16px' }}>
+                      <i className="ti ti-address-book" aria-hidden="true"></i> Address Book
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '18px' }}>
+                      <input className="arc-input" type="text" placeholder="Name" value={contactName} onChange={(e) => setContactName(e.target.value)} style={{ width: '32%' }} />
+                      <input className="arc-input" type="text" placeholder="0x..." value={contactAddress} onChange={(e) => setContactAddress(e.target.value)} style={{ width: '50%' }} />
+                      <button className="arc-btn" onClick={saveNewContact} style={{ width: '18%', marginTop: 0, padding: '0 4px', fontSize: '11px' }}>
+                        Add
+                      </button>
+                    </div>
+
+                    <div style={{ flex: 1, overflowY: 'auto', maxHeight: '250px', borderTop: '1px solid var(--arc-border)' }} id="contacts-list">
+                      {contacts.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: 'var(--arc-muted)', textAlign: 'center', padding: '24px' }}>
+                          No contacts saved.
+                        </div>
+                      ) : (
+                        contacts.map((contact, i) => (
+                          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderBottom: '1px solid var(--arc-border)', fontSize: '12px' }}>
+                            <div onClick={() => selectContactField(contact.address)} style={{ cursor: 'pointer', flex: 1 }}>
+                              <div style={{ fontWeight: 600, color: 'var(--arc-accent)' }}>{contact.name}</div>
+                              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: 'var(--arc-muted)' }}>
+                                {contact.address.slice(0, 10)}...{contact.address.slice(-6)}
+                              </div>
+                            </div>
+                            <button onClick={() => deleteContactAtIndex(i)} style={{ background: 'transparent', border: 'none', color: '#e35f4a', cursor: 'pointer', fontSize: '13px', padding: '0 4px' }}>
+                              <i className="ti ti-trash"></i>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
+
+            {/* -----------------------------------------------------------------
+                F. HISTORY PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'history' && (
+              <div id="panel-history">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-history" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Transaction History
+                </div>
+                <div className="arc-history">
+                  <div className="arc-tokens-header">
+                    <span className="arc-tokens-title">Recent On-Chain Transactions</span>
+                    <select className="arc-select" style={{ width: 'auto', padding: '5px 10px', fontSize: '11px' }}>
+                      <option>Last 5000 Blocks</option>
+                    </select>
+                  </div>
+
+                  {onChainLogs.length === 0 ? (
+                    <div style={{ padding: '24px', textAlign: 'center', color: 'var(--arc-muted)', fontSize: '12px' }}>
+                      No on-chain transfers found in the last 5000 blocks. Try connecting your wallet active address.
+                    </div>
+                  ) : (
+                    onChainLogs.map((log, i) => {
+                      const iconClass = log.type === 'send' ? 'arc-tx-send' : 'arc-tx-receive';
+                      const iconText = log.type === 'send' ? '↑' : '↓';
+                      return (
+                        <div className="arc-tx-row" key={i}>
+                          <div className={`arc-tx-icon ${iconClass}`}><i>{iconText}</i></div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 500 }}>{log.type === 'send' ? 'Sent' : 'Received'} {log.description}</div>
+                            <div className="arc-tx-hash" style={{ cursor: 'pointer' }} onClick={() => window.open(`https://testnet.arcscan.app/tx/${log.hash}`, '_blank')}>
+                              {log.hash.slice(0, 6)}...{log.hash.slice(-4)}
+                            </div>
+                          </div>
+                          <div className="arc-tx-time">Block {log.blockNo}</div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                G. WALLET STATUS PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'wallet' && (
+              <div id="panel-wallet">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-wallet" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Wallet Status
+                </div>
+                <div className="arc-panel" style={{ maxWidth: '380px', textAlign: 'center', padding: '28px 20px' }}>
+                  
+                  {!activeAddress ? (
+                    <>
+                      <div id="wallet-detect-status" style={{ fontSize: '13px', color: 'var(--arc-muted)', marginBottom: '20px' }}>
+                        Detecting browser extensions...
+                      </div>
+                      
+                      <button className="arc-btn" id="btn-connect-wallet" onClick={connectBrowserWallet}>
+                        Connect Browser Wallet
+                      </button>
+                    </>
+                  ) : (
+                    <div id="wallet-connected-details">
+                      <div style={{ fontSize: '11px', color: 'var(--arc-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                        Connected Account
+                      </div>
+                      <div style={{ fontFamily: "'Space Mono', monospace", fontSize: '13px', color: 'var(--arc-accent)', marginBottom: '14px', wordBreak: 'break-all' }} id="connected-account-val">
+                        {activeAddress}
+                      </div>
+
+                      {/* Display dynamic deposit QR link code */}
+                      <div style={{ margin: '22px 0 26px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 500 }}>
+                          P2P Deposit QR Code
+                        </div>
+                        <div style={{ backgroundColor: 'white', padding: '12px', borderRadius: '12px', display: 'inline-block' }}>
+                          <canvas id="wallet-qr"></canvas>
+                        </div>
+                        <button className="arc-btn arc-btn-secondary" style={{ width: 'auto', padding: '6px 14px', fontSize: '12px', marginTop: '4px' }} onClick={() => {
+                          const paylinkUrl = `${window.location.origin}${window.location.pathname}?to=${activeAddress}`;
+                          navigator.clipboard.writeText(paylinkUrl).then(() => {
+                            showToast('P2P Paylink copied to clipboard!');
+                          });
+                        }}>
+                          Copy Shareable Paylink
+                        </button>
+                      </div>
+
+                      <button className="arc-btn arc-btn-secondary" onClick={disconnectLocalWallet}>
+                        Disconnect Wallet
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                H. SETTINGS PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'settings' && (
+              <div id="panel-settings">
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-settings" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Settings
+                </div>
+                <div className="arc-panel" style={{ maxWidth: '380px' }}>
+                  <div className="arc-field">
+                    <label>RPC Endpoint</label>
+                    <input className="arc-input" type="text" value={rpcEndpoint} onChange={(e) => setRpcEndpoint(e.target.value)} id="rpc-endpoint" />
+                  </div>
+                  <div className="arc-field">
+                    <label>Default Slippage</label>
+                    <select className="arc-select" value={slippage} onChange={(e) => setSlippage(e.target.value)}>
+                      <option value="0.5%">0.5%</option>
+                      <option value="1%">1%</option>
+                      <option value="2%">2%</option>
+                      <option value="3%">3%</option>
+                    </select>
+                  </div>
+                  <div className="arc-field">
+                    <label>Gas Multiplier</label>
+                    <select className="arc-select" value={gasMultiplier} onChange={(e) => setGasMultiplier(e.target.value)} id="gas-multiplier">
+                      <option value="1.0x (Standard)">1.0x (Standard)</option>
+                      <option value="1.2x (Fast)">1.2x (Fast)</option>
+                      <option value="1.5x (Instant)">1.5x (Instant)</option>
+                    </select>
+                  </div>
+                  <button className="arc-btn" onClick={saveSettingsAction}>
+                    Save Settings
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      </div>
+
+      {/* Toast Alert Banner Wrapper */}
+      {isToastVisible && (
+        <div 
+          id="arc-toast" 
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            backgroundColor: '#111417',
+            border: `1px solid ${toastColor}`,
+            color: toastColor,
+            padding: '10px 16px',
+            borderRadius: '10px',
+            fontSize: '13px',
+            fontFamily: "'DM Sans', sans-serif",
+            zIndex: 9999,
+            maxWidth: '280px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
+
+    </div>
+  );
+}
