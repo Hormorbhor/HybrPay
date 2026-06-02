@@ -74,6 +74,7 @@ export default function App() {
   const [splashOpacity, setSplashOpacity] = useState<number>(1);
   const [isSplashRendered, setIsSplashRendered] = useState<boolean>(true);
   const [activePanel, setActivePanel] = useState<string>('dashboard');
+  const [docsTab, setDocsTab] = useState<'pitch' | 'features' | 'usecases' | 'loyalty'>('pitch');
 
   // Wallet and Provider States
   const [activeAddress, setActiveAddress] = useState<string>(() => localStorage.getItem('arc_active_address') || '');
@@ -210,6 +211,45 @@ export default function App() {
     const val = localStorage.getItem('hybri_completed_quests');
     return val ? JSON.parse(val) : [];
   });
+
+  // User feedback states
+  const [feedbacks, setFeedbacks] = useState<{
+    id: string;
+    username: string;
+    comment: string;
+    rating: number;
+    timestamp: string;
+    likes: number;
+    testingArea: string;
+  }[]>(() => {
+    const saved = localStorage.getItem('hybri_feedbacks');
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        // Filter out seed mock/sandbox feedbacks and quick test entries
+        return parsed.filter(item => 
+          item.id !== '1' && 
+          item.id !== '2' && 
+          item.id !== '3' && 
+          item.username !== 'Anonymous_Tester' &&
+          item.comment?.toLowerCase() !== 'good'
+        );
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  const [feedbackName, setFeedbackName] = useState<string>('');
+  const [feedbackComment, setFeedbackComment] = useState<string>('');
+  const [feedbackRating, setFeedbackRating] = useState<number>(5);
+  const [feedbackArea, setFeedbackArea] = useState<string>('All Features');
+
+  useEffect(() => {
+    localStorage.setItem('hybri_feedbacks', JSON.stringify(feedbacks));
+  }, [feedbacks]);
 
   useEffect(() => {
     localStorage.setItem('hybri_loyalty_points', String(loyaltyPoints));
@@ -1792,6 +1832,12 @@ export default function App() {
               <i className="ti ti-history" aria-hidden="true"></i> History
             </div>
 
+            <div className="arc-nav-section">PITCH & DOCS</div>
+            
+            <div className={`arc-nav-item ${activePanel === 'docs' ? 'active' : ''}`} onClick={() => setActivePanel('docs')}>
+              <i className="ti ti-presentation" aria-hidden="true"></i> Pitch & Docs
+            </div>
+
             <div className="arc-nav-section">Wallet</div>
             
             <div className={`arc-nav-item ${activePanel === 'wallet' ? 'active' : ''}`} onClick={() => setActivePanel('wallet')}>
@@ -3137,6 +3183,666 @@ export default function App() {
                   <button className="arc-btn" onClick={saveSettingsAction}>
                     Save Settings
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* -----------------------------------------------------------------
+                EXECUTIVE PITCH & PLATFORM DOCUMENTATION PANEL
+                ---------------------------------------------------------------- */}
+            {activePanel === 'docs' && (
+              <div id="panel-docs" style={{ animation: 'fadeIn 0.4s ease-out' }}>
+                <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="ti ti-presentation" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Platform Pitch & Interactive Documentation
+                </div>
+
+                {/* Sub-tabs styling with pixel border and retro styling */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '22px' }}>
+                  <button 
+                    className={`arc-tab-button ${docsTab === 'pitch' ? 'active' : ''}`} 
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontFamily: "'Space Mono', monospace", 
+                      fontSize: '12.5px', 
+                      cursor: 'pointer',
+                      border: '2px solid #000000',
+                      backgroundColor: docsTab === 'pitch' ? 'var(--arc-accent)' : 'var(--arc-surface)',
+                      color: docsTab === 'pitch' ? '#000000' : 'var(--arc-text)',
+                      boxShadow: '3px 3px 0px #000000',
+                      fontWeight: docsTab === 'pitch' ? '700' : '400',
+                      transition: 'all 0.2s steps(2)'
+                    }}
+                    onClick={() => setDocsTab('pitch')}
+                  >
+                    📖 About HybriPay
+                  </button>
+                  <button 
+                    className={`arc-tab-button ${docsTab === 'features' ? 'active' : ''}`} 
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontFamily: "'Space Mono', monospace", 
+                      fontSize: '12.5px', 
+                      cursor: 'pointer',
+                      border: '2px solid #000000',
+                      backgroundColor: docsTab === 'features' ? 'var(--arc-accent2)' : 'var(--arc-surface)',
+                      color: docsTab === 'features' ? '#ffffff' : 'var(--arc-text)',
+                      boxShadow: '3px 3px 0px #000000',
+                      fontWeight: docsTab === 'features' ? '700' : '400',
+                      transition: 'all 0.2s steps(2)'
+                    }}
+                    onClick={() => setDocsTab('features')}
+                  >
+                    ⚙️ Core Functionalities & System Diagrams
+                  </button>
+                  <button 
+                    className={`arc-tab-button ${docsTab === 'usecases' ? 'active' : ''}`} 
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontFamily: "'Space Mono', monospace", 
+                      fontSize: '12.5px', 
+                      cursor: 'pointer',
+                      border: '2px solid #000000',
+                      backgroundColor: docsTab === 'usecases' ? 'var(--arc-accent)' : 'var(--arc-surface)',
+                      color: docsTab === 'usecases' ? '#000000' : 'var(--arc-text)',
+                      boxShadow: '3px 3px 0px #000000',
+                      fontWeight: docsTab === 'usecases' ? '700' : '400',
+                      transition: 'all 0.2s steps(2)'
+                    }}
+                    onClick={() => setDocsTab('usecases')}
+                  >
+                    💡 Professional Use Cases
+                  </button>
+                  <button 
+                    className={`arc-tab-button ${docsTab === 'loyalty' ? 'active' : ''}`} 
+                    style={{ 
+                      padding: '8px 16px', 
+                      fontFamily: "'Space Mono', monospace", 
+                      fontSize: '12.5px', 
+                      cursor: 'pointer',
+                      border: '2px solid #000000',
+                      backgroundColor: docsTab === 'loyalty' ? 'var(--arc-accent2)' : 'var(--arc-surface)',
+                      color: docsTab === 'loyalty' ? '#ffffff' : 'var(--arc-text)',
+                      boxShadow: '3px 3px 0px #000000',
+                      fontWeight: docsTab === 'loyalty' ? '700' : '400',
+                      transition: 'all 0.2s steps(2)'
+                    }}
+                    onClick={() => setDocsTab('loyalty')}
+                  >
+                    🏆 Loyalty Loop Mechanics
+                  </button>
+                </div>
+
+                <div className="arc-panel" style={{ padding: '24px', lineHeight: '1.6' }}>
+                  
+                  {/* TAB 1: ABOUT HYBRIPAY */}
+                  {docsTab === 'pitch' && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--arc-border)', paddingBottom: '12px', marginBottom: '18px' }}>
+                        <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--arc-accent)' }}>ABOUT HYBRIPAY</h3>
+                        <span style={{ fontSize: '10px', padding: '3px 8px', border: '1px solid var(--arc-accent)', color: 'var(--arc-accent)' }}>ARC NETWORK ECOSYSTEM APPROVED</span>
+                      </div>
+
+                      <div style={{ marginBottom: '20px' }}>
+                        <div style={{ fontSize: '14px', fontWeight: 700, marginBottom: '6px', color: 'var(--arc-text)' }}>🚀 The Vision</div>
+                        <p style={{ fontSize: '12px', color: 'var(--arc-text)', opacity: 0.85 }}>
+                          HybriPay is a <strong>next-generation Web3 DeFi Payments and Secure Escrow Checkout Infrastructure</strong>. Built natively on high-throughput distributed architectures, it offers modern digital merchants, creators, and DeFi participants a unified hub for trade, invoicing, non-custodial lockup vaults, gas optimization, and interactive loyalty points rewards.
+                        </p>
+                      </div>
+
+                      <div className="arc-grid" style={{ marginBottom: '20px', gap: '16px' }}>
+                        <div style={{ border: '1px solid var(--arc-border)', padding: '14px', borderRadius: '4px', backgroundColor: 'rgba(0,0,0,0.2)' }}>
+                          <div style={{ fontStyle: 'normal', color: 'var(--arc-accent2)', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>⚠️ The Problem in Web3 Payments</div>
+                          <ul style={{ fontSize: '11px', listStyleType: 'square', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '6px', opacity: 0.85 }}>
+                            <li><strong>Lack of Buyer/Seller Protection:</strong> Traditional cryptocurrency transfers are irreversible, exposing peer-to-peer commerce to systemic counterpart risk.</li>
+                            <li><strong>Fragmented DeFi Operations:</strong> Swapping, staking, pay-outs, and invoices exist across separate, non-integrated dApps.</li>
+                            <li><strong>No Real Loyalty Incentive:</strong> High Web3 transactional fees are paid directly to miners/validators with zero rewards routed back to consumers.</li>
+                          </ul>
+                        </div>
+
+                        <div style={{ border: '2px solid var(--arc-accent)', padding: '14px', borderRadius: '4px', backgroundColor: 'rgba(0,255,210,0.03)' }}>
+                          <div style={{ fontStyle: 'normal', color: 'var(--arc-accent)', fontSize: '13px', fontWeight: 700, marginBottom: '6px' }}>✔️ The HybriPay Solution</div>
+                          <ul style={{ fontSize: '11px', listStyleType: 'disc', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '6px', opacity: 0.95 }}>
+                            <li><strong>Smart Escrow Settlement:</strong> Trustless buyer protection via on-chain contract holding until cargo delivery or service criteria approval.</li>
+                            <li><strong>Unified Hybrid Vault Layout:</strong> Secure interest vaults providing high-yield liquidity lock-ins alongside multi-token cross swapping.</li>
+                            <li><strong>Tokenized loyalty loops:</strong> Retain customers through gamified <strong>Tier Levels</strong> and transaction rebates.</li>
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div style={{ borderTop: '1px solid var(--arc-border)', paddingTop: '16px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, marginBottom: '8px', color: 'var(--arc-text)' }}>💼 Market Positioning & Pitch Strategy</div>
+                        <p style={{ fontSize: '12px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '10px' }}>
+                          HybriPay targets the rapidly growing <strong>$12B+ Web3 merchant checkout and service freelancing</strong> sector. By combining premium visual experience styling (gorgeous custom environments like Arc Cyber & Dark Cyber settings) with modular full-stack capabilities, it establishes a reliable payment stack for digital-native users.
+                        </p>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'var(--arc-surface)', borderLeft: '3px solid var(--arc-accent)', fontSize: '11px', color: 'var(--arc-muted)' }}>
+                          💡 <em>"HybriPay bridges the accessibility gap by transforming crypto settlements into secure, gamified micro-interactions."</em>
+                        </div>
+                      </div>
+
+                      {/* --- INTERACTIVE TESTER FEEDBACK SECTION --- */}
+                      <div style={{ marginTop: '30px', borderTop: '2px dashed var(--arc-border)', paddingTop: '20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ backgroundColor: 'var(--arc-accent)', color: '#000', fontSize: '10px', padding: '2px 6px', fontWeight: 'bold' }}>FEEDBACK</span>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--arc-text)' }}>💬 Community Test Feedbacks & Comments</div>
+                          </div>
+                          {feedbacks.length > 0 && (
+                            <button 
+                              onClick={() => {
+                                setFeedbacks([]);
+                                localStorage.removeItem('hybri_feedbacks');
+                              }}
+                              style={{
+                                background: 'none',
+                                border: '1px solid rgba(255, 0, 0, 0.4)',
+                                padding: '3px 8px',
+                                fontSize: '10px',
+                                color: '#ff5555',
+                                cursor: 'pointer',
+                                borderRadius: '3px',
+                                fontFamily: "'Space Mono', monospace",
+                                transition: 'all 0.2s'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                              }}
+                            >
+                              🗑️ Clear Feedbacks
+                            </button>
+                          )}
+                        </div>
+                        <p style={{ fontSize: '11px', color: 'var(--arc-text)', opacity: 0.75, marginBottom: '16px' }}>
+                          Drop your thoughts below after testing the application functionalities (Escrow, Invoicing, Swap, or Vault staking).
+                        </p>
+
+                        {/* Submission Form */}
+                        <div style={{ backgroundColor: 'rgba(0,0,0,0.15)', border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '16px', marginBottom: '20px' }}>
+                          <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-text)', marginBottom: '12px' }}>
+                            Submit New Feedback
+                          </div>
+
+                          <div className="arc-grid" style={{ marginBottom: '12px', gap: '12px' }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: 'var(--arc-text)', opacity: 0.75, marginBottom: '4px' }}>Tester Handle / Username</label>
+                              <input 
+                                type="text" 
+                                className="arc-input" 
+                                placeholder="e.g. Satoshi_Arc" 
+                                value={feedbackName} 
+                                onChange={(e) => setFeedbackName(e.target.value)} 
+                              />
+                            </div>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '10px', color: 'var(--arc-text)', opacity: 0.75, marginBottom: '4px' }}>Target testing Feature</label>
+                              <select 
+                                className="arc-select" 
+                                value={feedbackArea} 
+                                onChange={(e) => setFeedbackArea(e.target.value)}
+                              >
+                                <option value="All Features">All Features</option>
+                                <option value="Secure Escrow Checkout">Secure Escrow Checkout</option>
+                                <option value="Web3 Invoicing">Web3 Invoicing</option>
+                                <option value="High-Yield Vaults">High-Yield Vaults</option>
+                                <option value="Spot Swap Router">Spot Swap Router</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '10px', color: 'var(--arc-text)', opacity: 0.75, marginBottom: '4px' }}>Rating (1 - 5 Stars)</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button 
+                                  key={star} 
+                                  type="button" 
+                                  onClick={() => setFeedbackRating(star)} 
+                                  style={{ 
+                                    padding: '4px 8px', 
+                                    backgroundColor: feedbackRating >= star ? 'var(--arc-accent)' : 'var(--arc-surface)', 
+                                    color: feedbackRating >= star ? '#000000' : 'var(--arc-text)', 
+                                    border: '1px solid var(--arc-border)', 
+                                    borderRadius: '3px',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  {star} ★
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div style={{ marginBottom: '15px' }}>
+                            <label style={{ display: 'block', fontSize: '10px', color: 'var(--arc-text)', opacity: 0.75, marginBottom: '4px' }}>Tester Comments & Feedback</label>
+                            <textarea 
+                              className="arc-input" 
+                              style={{ width: '100%', minHeight: '60px', resize: 'vertical', fontFamily: 'inherit', fontSize: '12px' }} 
+                              placeholder="Describe your testing experience..."
+                              value={feedbackComment}
+                              onChange={(e) => setFeedbackComment(e.target.value)}
+                            />
+                          </div>
+
+                          <button 
+                            className="arc-btn" 
+                            style={{ padding: '8px 16px', fontSize: '11px' }}
+                            onClick={() => {
+                              if (!feedbackComment.trim()) return;
+                              const user = feedbackName.trim() || 'Anonymous_Tester';
+                              const freshFeedback = {
+                                id: String(Date.now()),
+                                username: user,
+                                comment: feedbackComment,
+                                rating: feedbackRating,
+                                timestamp: new Date().toISOString().replace('T', ' ').substring(0, 16),
+                                likes: 0,
+                                testingArea: feedbackArea
+                              };
+                              setFeedbacks(prev => [freshFeedback, ...prev]);
+                              setFeedbackComment('');
+                              setFeedbackName('');
+                              setFeedbackRating(5);
+                              
+                              // Loyalty feedback reward bonus!
+                              setLoyaltyPoints(prev => prev + 10);
+                            }}
+                          >
+                            🚀 Submit Feedback & Claim Tier Reward (+10 PTS)
+                          </button>
+                        </div>
+
+                        {/* Comments Feed */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {feedbacks.length === 0 ? (
+                            <div style={{ 
+                              textAlign: 'center', 
+                              padding: '30px 20px', 
+                              border: '1px dashed var(--arc-border)', 
+                              borderRadius: '4px', 
+                              color: 'var(--arc-muted)',
+                              backgroundColor: 'rgba(0,0,0,0.1)'
+                            }}>
+                              <i className="ti ti-messages" style={{ fontSize: '24px', display: 'block', marginBottom: '8px', color: 'var(--arc-accent)' }}></i>
+                              <div style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--arc-text)' }}>No Testing Feedback Yet</div>
+                              <p style={{ fontSize: '11px', margin: '4px 0 0 0', opacity: 0.75 }}>
+                                Be the first to share your live testing experience of the Escrow, Vault, Swap, or Invoicing suite!
+                              </p>
+                            </div>
+                          ) : (
+                            feedbacks.map((f) => (
+                              <div key={f.id} style={{ border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '12px', backgroundColor: 'var(--arc-surface)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: 'var(--arc-accent)' }}>@{f.username}</span>
+                                    <span style={{ fontSize: '9px', backgroundColor: 'rgba(255,255,255,0.08)', padding: '2px 5px', borderRadius: '3px', color: 'var(--arc-text)' }}>
+                                      🎯 {f.testingArea}
+                                    </span>
+                                  </div>
+                                  <div style={{ color: 'var(--arc-accent2)', fontSize: '11px', fontWeight: 'bold' }}>
+                                    {'★'.repeat(f.rating)}{'☆'.repeat(5 - f.rating)}
+                                  </div>
+                                </div>
+                                <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', margin: '0 0 8px 0', opacity: 0.9 }}>
+                                  {f.comment}
+                                </p>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9.5px', color: 'var(--arc-muted)' }}>
+                                  <span>🕒 {f.timestamp}</span>
+                                  <button 
+                                    style={{ 
+                                      background: 'none', 
+                                      border: 'none', 
+                                      color: 'var(--arc-accent)', 
+                                      cursor: 'pointer', 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: '4px',
+                                      fontFamily: "'Space Mono', monospace"
+                                    }}
+                                    onClick={() => {
+                                      setFeedbacks(prev => prev.map(item => item.id === f.id ? { ...item, likes: item.likes + 1 } : item));
+                                    }}
+                                  >
+                                    👍 Upvote Reaction ({f.likes})
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: SYSTEM FUNCTIONALITIES & DIAGRAMS */}
+                  {docsTab === 'features' && (
+                    <div>
+                      <div style={{ borderBottom: '1px solid var(--arc-border)', paddingBottom: '12px', marginBottom: '18px' }}>
+                        <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--arc-accent)' }}>⚙️ ARCHITECTURE & CORE FUNCTIONALITIES</h3>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)' }}>Interactive Vector Schematics representing transaction processes</div>
+                      </div>
+
+                      {/* FEATURE A: Secure Escrow Checkout */}
+                      <div style={{ marginBottom: '28px', borderBottom: '1px dashed var(--arc-border)', paddingBottom: '24px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <span style={{ backgroundColor: 'var(--arc-accent)', color: '#000000', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>A</span>
+                          <span style={{ fontSize: '13px', fontWeight: 700 }}>Decentralized Milestone Escrow Checkout</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '14px' }}>
+                          Protects buyers and sellers from counterpart failure. The buyer locks assets inside the Escrow Contract. Funds are safely held until the buyer verifies completion of cargo delivery, milestones, or service specifications, initiating a mutual fee rebate.
+                        </p>
+
+                        {/* Interactive SVG Diagram 1 */}
+                        <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: '#07090d', border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '16px 8px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 180" style={{ width: '100%', maxWidth: '540px' }} aria-label="Escrow Checkout Flowchart">
+                            {/* Gradients */}
+                            <defs>
+                              <linearGradient id="escrowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stopColor="var(--arc-accent)" stopOpacity="0.25" />
+                                <stop offset="100%" stopColor="var(--arc-accent2)" stopOpacity="0.1" />
+                              </linearGradient>
+                            </defs>
+                            {/* Actor 1: Buyer */}
+                            <rect x="15" y="55" width="105" height="42" rx="4" fill="#131922" stroke="var(--arc-text)" strokeWidth="1" />
+                            <text x="30" y="75" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">0xBuyer</text>
+                            <text x="35" y="88" fill="var(--arc-muted)" fontSize="8" fontFamily="'Space Mono', monospace">Initiates Deal</text>
+
+                            {/* Arrow 1 */}
+                            <line x1="120" y1="76" x2="215" y2="76" stroke="var(--arc-accent)" strokeWidth="1.5" strokeDasharray="3,3" />
+                            <polygon points="215,72 223,76 215,80" fill="var(--arc-accent)" />
+                            <text x="130" y="68" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">1. Lock USDC</text>
+
+                            {/* Center Contract: Escrow */}
+                            <rect x="225" y="35" width="150" height="85" rx="6" fill="url(#escrowGrad)" stroke="var(--arc-accent)" strokeWidth="1.5" />
+                            <text x="245" y="58" fill="var(--arc-text)" fontSize="11" fontFamily="'Space Mono', monospace" fontWeight="bold">Smart Escrow</text>
+                            <text x="240" y="72" fill="var(--arc-accent)" fontSize="9" fontFamily="'Space Mono', monospace">Contract Verified</text>
+                            <text x="242" y="88" fill="var(--arc-accent2)" fontSize="9" fontFamily="'Space Mono', monospace" fontWeight="bold">STATUS: HOLDING</text>
+                            <rect x="242" y="98" width="116" height="15" rx="2" fill="#000" stroke="var(--arc-border)" strokeWidth="1" />
+                            <text x="250" y="109" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Active ID: #ESC-082</text>
+
+                            {/* Arrow 2 */}
+                            <line x1="375" y1="76" x2="470" y2="76" stroke="var(--arc-accent2)" strokeWidth="1.5" />
+                            <polygon points="470,72 478,76 470,80" fill="var(--arc-accent2)" />
+                            <text x="382" y="68" fill="var(--arc-accent2)" fontSize="8" fontFamily="'Space Mono', monospace">2. Release Pay</text>
+
+                            {/* Actor 2: Seller */}
+                            <rect x="480" y="55" width="105" height="42" rx="4" fill="#131922" stroke="var(--arc-text)" strokeWidth="1" />
+                            <text x="495" y="75" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">0xSeller</text>
+                            <text x="498" y="88" fill="var(--arc-muted)" fontSize="8" fontFamily="'Space Mono', monospace">Receives Payout</text>
+
+                            {/* Dotted curve back for Loyalty */}
+                            <path d="M 532,97 Q 300,170 65,97" fill="none" stroke="var(--arc-accent)" strokeWidth="1" strokeDasharray="2,2" />
+                            <text x="270" y="150" fill="var(--arc-accent)" fontSize="9" fontFamily="'Space Mono', monospace" textAnchor="middle">🏆 +10 Loyalty Points Accrued</text>
+                          </svg>
+                        </div>
+                      </div>
+
+                      {/* FEATURE B: Crypto Swapping Ecosystem */}
+                      <div style={{ marginBottom: '28px', borderBottom: '1px dashed var(--arc-border)', paddingBottom: '24px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <span style={{ backgroundColor: 'var(--arc-accent2)', color: '#ffffff', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>B</span>
+                          <span style={{ fontSize: '13px', fontWeight: 700 }}>Direct Spot Swap Router</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '14px' }}>
+                          No more leaving the merchant page to swap assets. The high-performance Swap Router leverages local token exchange reserves with Slippage tolerance metrics to swap USDC, EURC, or yielding assets (USYC) in a single-step signature transaction.
+                        </p>
+
+                        {/* Interactive SVG Diagram 2 */}
+                        <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: '#07090d', border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '16px 8px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 130" style={{ width: '100%', maxWidth: '540px' }} aria-label="Trade Swap Router Flowchart">
+                            {/* Swap process blocks */}
+                            <rect x="20" y="40" width="100" height="40" rx="3" fill="rgba(255,255,255,0.02)" stroke="var(--arc-border)" strokeWidth="1" />
+                            <text x="35" y="64" fill="var(--arc-text)" fontSize="11" fontFamily="'Space Mono', monospace" fontWeight="bold">Input: USYC</text>
+
+                            {/* Arrows */}
+                            <line x1="120" y1="60" x2="200" y2="60" stroke="var(--arc-accent)" strokeWidth="1" />
+                            <polygon points="200,57 207,60 200,63" fill="var(--arc-accent)" />
+                            <text x="130" y="52" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Router Path</text>
+
+                            {/* Swap engine */}
+                            <rect x="210" y="25" width="180" height="70" rx="4" fill="#131922" stroke="var(--arc-accent2)" strokeWidth="1.5" />
+                            <text x="245" y="48" fill="var(--arc-accent2)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">Liquidity Router</text>
+                            <text x="230" y="63" fill="#ffffff" fontSize="8" fontFamily="'Space Mono', monospace">Slippage Check: &lt;2% OK</text>
+                            <text x="228" y="77" fill="var(--arc-muted)" fontSize="8" fontFamily="'Space Mono', monospace" textAnchor="start">Rate: 1 USYC = 1.00 USDC</text>
+
+                            <line x1="390" y1="60" x2="470" y2="60" stroke="#fff" strokeWidth="1" />
+                            <polygon points="470,57 477,60 470,63" fill="#fff" />
+
+                            <rect x="480" y="40" width="100" height="40" rx="3" fill="rgba(0,255,210,0.05)" stroke="var(--arc-accent)" strokeWidth="1" />
+                            <text x="495" y="64" fill="var(--arc-accent)" fontSize="11" fontFamily="'Space Mono', monospace" fontWeight="bold">Output: USDC</text>
+                          </svg>
+                        </div>
+                      </div>
+
+                      {/* FEATURE C: Direct Merchant Invoicing */}
+                      <div style={{ marginBottom: '28px', borderBottom: '1px dashed var(--arc-border)', paddingBottom: '24px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <span style={{ backgroundColor: 'var(--arc-accent)', color: '#000000', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>C</span>
+                          <span style={{ fontSize: '13px', fontWeight: 700 }}>Web3 Merchant Invoicing System</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '14px' }}>
+                          Simplifies peer-to-peer and business-to-consumer client requests. Merchants draft customizable invoices specifying items, amounts, target customer addresses, and reference documents (PDF guides, code specifications, or external drive links). Payers resolve the invoice seamlessly with automated checkout panels.
+                        </p>
+
+                        {/* Interactive SVG Diagram 3 */}
+                        <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: '#07090d', border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '16px 8px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 130" style={{ width: '100%', maxWidth: '540px' }} aria-label="Invoice Process Schematic">
+                            <rect x="20" y="35" width="115" height="50" rx="3" fill="#131922" stroke="var(--arc-border)" strokeWidth="1" />
+                            <text x="30" y="55" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">Merchant Drafts</text>
+                            <text x="30" y="70" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Items, URL + Specs</text>
+
+                            <line x1="135" y1="60" x2="225" y2="60" stroke="var(--arc-accent)" strokeWidth="1.2" />
+                            <polygon points="225,57 232,60 225,63" fill="var(--arc-accent)" />
+                            <text x="145" y="51" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Generates QR / Link</text>
+
+                            <rect x="235" y="35" width="130" height="50" rx="3" fill="#101014" stroke="var(--arc-accent2)" strokeWidth="1.5" />
+                            <text x="245" y="55" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">Buyer Approves</text>
+                            <text x="245" y="70" fill="var(--arc-accent2)" fontSize="8" fontFamily="'Space Mono', monospace">Instant Ethers Pay</text>
+
+                            <line x1="365" y1="60" x2="455" y2="60" stroke="#fff" strokeWidth="1.2" />
+                            <polygon points="455,57 462,60 455,63" fill="#fff" />
+
+                            <rect x="465" y="35" width="115" height="50" rx="3" fill="rgba(0,255,210,0.04)" stroke="var(--arc-accent)" strokeWidth="1.2" />
+                            <text x="475" y="55" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">Final Settlement</text>
+                            <text x="475" y="70" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Gas Optimized Receipt</text>
+                          </svg>
+                        </div>
+                      </div>
+
+                      {/* FEATURE D: Yield-Generating Vaults */}
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                          <span style={{ backgroundColor: 'var(--arc-accent2)', color: '#ffffff', padding: '2px 6px', fontSize: '10px', fontWeight: 700 }}>D</span>
+                          <span style={{ fontSize: '13px', fontWeight: 700 }}>Yield-Generating Collateral Vaults</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '14px' }}>
+                          Put assets to work. High-Performance Vault locks (USDC, EURC, USYC) let users stake reserve funds for a selected time window (5-min/10-min simulated fast blocks) compounding fixed high APR interests directly backed by liquid treasury system reserves. Fully claimed yield increments balances instantly.
+                        </p>
+
+                        {/* Interactive SVG Diagram 4 */}
+                        <div style={{ display: 'flex', justifyContent: 'center', backgroundColor: '#07090d', border: '1px solid var(--arc-border)', borderRadius: '4px', padding: '16px 8px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 130" style={{ width: '100%', maxWidth: '540px' }} aria-label="Yield Vault Schematic">
+                            <rect x="25" y="40" width="110" height="42" rx="3" fill="#131922" stroke="var(--arc-border)" strokeWidth="1" />
+                            <text x="35" y="58" fill="var(--arc-text)" fontSize="9" fontFamily="'Space Mono', monospace" fontWeight="bold">Deposit Capital</text>
+                            <text x="35" y="70" fill="var(--arc-accent2)" fontSize="8" fontFamily="'Space Mono', monospace">e.g. 5,000 USDC</text>
+
+                            <line x1="135" y1="61" x2="215" y2="61" stroke="var(--arc-accent2)" strokeWidth="1.2" />
+                            <polygon points="215,58 222,61 215,64" fill="var(--arc-accent2)" />
+
+                            {/* Secure Locker Cylinder */}
+                            <rect x="225" y="25" width="150" height="70" rx="3" fill="#101014" stroke="var(--arc-accent)" strokeWidth="1.5" />
+                            <circle cx="260" cy="60" r="16" fill="none" stroke="var(--arc-accent)" strokeWidth="2" strokeDasharray="3,3" />
+                            <text x="288" y="52" fill="var(--arc-text)" fontSize="10" fontFamily="'Space Mono', monospace" fontWeight="bold">LOCKED VAULT</text>
+                            <text x="288" y="66" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">8.5% Base APR</text>
+                            <text x="288" y="78" fill="var(--arc-accent2)" fontSize="8" fontFamily="'Space Mono', monospace" fontWeight="bold">Locking: 10 MIN</text>
+
+                            <line x1="375" y1="61" x2="455" y2="61" stroke="var(--arc-accent)" strokeWidth="1.2" />
+                            <polygon points="455,58 462,61 455,64" fill="var(--arc-accent)" />
+
+                            <rect x="465" y="40" width="110" height="42" rx="3" fill="rgba(0,255,210,0.05)" stroke="var(--arc-accent)" strokeWidth="1.2" />
+                            <text x="475" y="58" fill="var(--arc-text)" fontSize="9" fontFamily="'Space Mono', monospace" fontWeight="bold">Maturity Claims</text>
+                            <text x="475" y="70" fill="var(--arc-accent)" fontSize="8" fontFamily="'Space Mono', monospace">Capital + Earned Payout</text>
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: USE CASES FOR THE PITCH */}
+                  {docsTab === 'usecases' && (
+                    <div>
+                      <div style={{ borderBottom: '1px solid var(--arc-border)', paddingBottom: '12px', marginBottom: '18px' }}>
+                        <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--arc-accent)' }}>💡 HIGH-FIDELITY USE CASES</h3>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)' }}>Real-world scenarios solving authentic transaction friction points</div>
+                      </div>
+
+                      {/* USE CASE 1 */}
+                      <div style={{ border: '1px solid var(--arc-border)', padding: '16px', borderRadius: '4px', marginBottom: '18px', backgroundColor: '#131922' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-accent)' }}>1. Freelance Contract & Milestone Fulfillment</span>
+                          <span style={{ color: 'var(--arc-muted)', fontSize: '9px', fontFamily: "'Space Mono', monospace", border: '1px solid var(--arc-border)', padding: '2px 6px' }}>Safe Escrow</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.9, marginBottom: '10px' }}>
+                          <strong>Scenario:</strong> Alice (a UI designer) enters an agreement to build design guidelines for Bob's project. Bob is worried Alice won't finish; Alice is worried Bob won't pay.
+                        </p>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'var(--arc-bg)', fontSize: '11px', borderLeft: '2px solid var(--arc-accent)', color: 'var(--arc-text)', opacity: 0.85 }}>
+                          ✔️ <strong>Solution with HybriPay:</strong> Bob triggers a HybriPay <strong>Escrow Contract Checkout</strong> specifying Alice's address. He locks 2,000 USDC in escrow. After Alice finishes the designs and uploads the proof of deliverables, Bob hits "Release Checkout" in the console. Funds settle immediately, and both Alice and Bob earn <strong>loyalty streak bonuses</strong>!
+                        </div>
+                      </div>
+
+                      {/* USE CASE 2 */}
+                      <div style={{ border: '1px solid var(--arc-border)', padding: '16px', borderRadius: '4px', marginBottom: '18px', backgroundColor: '#131922' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-accent)' }}>2. Instant Cross-Border Merchant Settling</span>
+                          <span style={{ color: 'var(--arc-muted)', fontSize: '9px', fontFamily: "'Space Mono', monospace", border: '1px solid var(--arc-border)', padding: '2px 6px' }}>Invoice + Spot Trade</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.9, marginBottom: '10px' }}>
+                          <strong>Scenario:</strong> Charlie runs an online hardware store. An international customer wants to pay Charlie in euro stablecoins (EURC) but Charlie only holds USD-pegged coins (USDC).
+                        </p>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'var(--arc-bg)', fontSize: '11px', borderLeft: '2px solid var(--arc-accent2)', color: 'var(--arc-text)', opacity: 0.85 }}>
+                          ✔️ <strong>Solution with HybriPay:</strong> Charlie creates a structured 1,500 USDC <strong>Merchant Invoice</strong>. The buyer opens the Invoice URL, hits the built-in <strong>Spot Swap Router</strong> to automatically swap their native EURC for USDC, and completes the invoice settlement in one seamless signature.
+                        </div>
+                      </div>
+
+                      {/* USE CASE 3 */}
+                      <div style={{ border: '1px solid var(--arc-border)', padding: '16px', borderRadius: '4px', backgroundColor: '#131922' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-accent)' }}>3. Enterprise Liquidity & Treasury Optimisation</span>
+                          <span style={{ color: 'var(--arc-muted)', fontSize: '9px', fontFamily: "'Space Mono', monospace", border: '1px solid var(--arc-border)', padding: '2px 6px' }}>High-Yield Vaults</span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'var(--arc-text)', opacity: 0.9, marginBottom: '10px' }}>
+                          <strong>Scenario:</strong> A decentralized web3 startup holds $50,000 in digital assets sitting completely dormant in their treasury wallet, earning 0% yield.
+                        </p>
+                        <div style={{ padding: '8px 12px', backgroundColor: 'var(--arc-bg)', fontSize: '11px', borderLeft: '2px solid var(--arc-accent)', color: 'var(--arc-text)', opacity: 0.85 }}>
+                          ✔️ <strong>Solution with HybriPay:</strong> The treasury manager locks part of their stable asset reserve into the <strong>HybriPay Real-Yield Vault</strong>. By staking they unlock reliable annual compounding yield percentages which accrue interest every block. Claims are unlocked on timer expiry, boosting overall enterprise liquidity metrics.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 4: LOYALTY & GAMIFICATION MECHANICS */}
+                  {docsTab === 'loyalty' && (
+                    <div>
+                      <div style={{ borderBottom: '1px solid var(--arc-border)', paddingBottom: '12px', marginBottom: '18px' }}>
+                        <h3 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--arc-accent)' }}>🏆 GAMIFIED LOYALTY ENGINE</h3>
+                        <div style={{ fontSize: '11px', color: 'var(--arc-muted)' }}>How HybriPay incentivizes frequent volume checkouts</div>
+                      </div>
+
+                      <div style={{ marginBottom: '22px' }}>
+                        <p style={{ fontSize: '12px', color: 'var(--arc-text)', opacity: 0.85, marginBottom: '12px' }}>
+                          At the core of HybriPay's user retention is a multi-tier transaction reward mechanism. Every time a user interacts (Creates invoices, locks vaults, releases escrows, swaps assets, or checks in daily), they claim <strong>Loyalty Experience Points</strong> directly updating their tier thresholds.
+                        </p>
+
+                        {/* Interactive Loyalty Previewer */}
+                        <div style={{ border: '2px dashed var(--arc-border)', borderRadius: '4px', padding: '16px', backgroundColor: 'rgba(0,0,0,0.1)', textAlign: 'center', marginBottom: '20px' }}>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--arc-accent)', marginBottom: '8px' }}>⚡ Live Pitch Tier Simulator</div>
+                          <div style={{ fontSize: '11px', color: 'var(--arc-text)', marginBottom: '12px' }}>
+                            Your current active pitch presentation points are estimated at: <strong>{loyaltyPoints} PTS</strong>
+                          </div>
+                          
+                          {/* Progress bar represent */}
+                          <div style={{ height: '14px', backgroundColor: '#000', border: '1px solid var(--arc-border)', borderRadius: '3px', position: 'relative', overflow: 'hidden', maxWidth: '380px', margin: '0 auto 12px auto' }}>
+                            <div 
+                              style={{ 
+                                height: '100%', 
+                                width: `${Math.min(100, (loyaltyPoints / 250) * 100)}%`, 
+                                backgroundColor: 'var(--arc-accent2)',
+                                transition: 'width 0.4s ease-out'
+                              }} 
+                            />
+                            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: '9px', fontWeight: 'bold', color: '#fff', textShadow: '1px 1px #000' }}>
+                              {Math.round(Math.min(100, (loyaltyPoints / 250) * 100))}% toward next Elite Arc rank
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+                            <button 
+                              className="arc-btn" 
+                              style={{ padding: '4px 10px', fontSize: '10px' }} 
+                              onClick={() => {
+                                setLoyaltyPoints(prev => prev + 15);
+                                localStorage.setItem('hybri_loyalty_points', String(loyaltyPoints + 15));
+                              }}
+                            >
+                              Simulate +15 PTS Interaction
+                            </button>
+                            <button 
+                              className="arc-btn" 
+                              style={{ padding: '4px 10px', fontSize: '10px', opacity: 0.7 }} 
+                              onClick={() => {
+                                setLoyaltyPoints(35);
+                                localStorage.setItem('hybri_loyalty_points', '35');
+                              }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Loyalty Matrix Grid */}
+                        <div className="arc-grid" style={{ gap: '12px' }}>
+                          <div style={{ border: '1px solid var(--arc-border)', padding: '10px', borderRadius: '4px', backgroundColor: loyaltyPoints < 50 ? 'rgba(0,255,210,0.02)' : 'transparent', opacity: loyaltyPoints < 50 ? 1 : 0.65 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#3b82f6', marginBottom: '4px' }}>🥉 BRONZE TIER (0 - 49 PTS)</div>
+                            <ul style={{ fontSize: '10px', paddingLeft: '12px', listStyleType: 'circle', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <li>Access to general checkouts</li>
+                              <li>Base gas fee multiplier</li>
+                              <li>Standard ARC support status</li>
+                            </ul>
+                          </div>
+
+                          <div style={{ border: '1px solid var(--arc-border)', padding: '10px', borderRadius: '4px', backgroundColor: (loyaltyPoints >= 50 && loyaltyPoints < 120) ? 'rgba(0,255,210,0.02)' : 'transparent', opacity: (loyaltyPoints >= 50 && loyaltyPoints < 120) ? 1 : 0.65 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8', marginBottom: '4px' }}>🥈 SILVER TIER (50 - 119 PTS)</div>
+                            <ul style={{ fontSize: '10px', paddingLeft: '12px', listStyleType: 'circle', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <li>1.05x staking APR booster</li>
+                              <li>-5% rebate on routing gas</li>
+                              <li>Custom Silver badge flag</li>
+                            </ul>
+                          </div>
+
+                          <div style={{ border: '1px solid var(--arc-border)', padding: '10px', borderRadius: '4px', backgroundColor: (loyaltyPoints >= 120 && loyaltyPoints < 250) ? 'rgba(0,255,210,0.02)' : 'transparent', opacity: (loyaltyPoints >= 120 && loyaltyPoints < 250) ? 1 : 0.65 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-accent)', marginBottom: '4px' }}>🥇 GOLD TIER (120 - 249 PTS)</div>
+                            <ul style={{ fontSize: '10px', paddingLeft: '12px', listStyleType: 'circle', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <li>1.15x staking APR booster</li>
+                              <li>-12% rebate on total gas</li>
+                              <li>Slippage auto-adjuster buffer</li>
+                            </ul>
+                          </div>
+
+                          <div style={{ border: '1px solid var(--arc-border)', padding: '10px', borderRadius: '4px', backgroundColor: loyaltyPoints >= 250 ? 'rgba(0,255,210,0.02)' : 'transparent', opacity: loyaltyPoints >= 250 ? 1 : 0.65 }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--arc-accent2)', marginBottom: '4px' }}>🌌 ARC CYBER TIER (250+ PTS)</div>
+                            <ul style={{ fontSize: '10px', paddingLeft: '12px', listStyleType: 'circle', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <li>1.30x premium APR booster</li>
+                              <li>-25% rebate on total gas</li>
+                              <li>Elite Cyber styled dashboard themes</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
