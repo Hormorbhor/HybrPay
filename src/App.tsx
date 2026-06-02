@@ -1832,10 +1832,10 @@ export default function App() {
               <i className="ti ti-history" aria-hidden="true"></i> History
             </div>
 
-            <div className="arc-nav-section">PITCH & DOCS</div>
+            <div className="arc-nav-section">ABOUT HYBRIPAY</div>
             
             <div className={`arc-nav-item ${activePanel === 'docs' ? 'active' : ''}`} onClick={() => setActivePanel('docs')}>
-              <i className="ti ti-presentation" aria-hidden="true"></i> Pitch & Docs
+              <i className="ti ti-info-circle" aria-hidden="true"></i> About HybriPay
             </div>
 
             <div className="arc-nav-section">Wallet</div>
@@ -3188,12 +3188,12 @@ export default function App() {
             )}
 
             {/* -----------------------------------------------------------------
-                EXECUTIVE PITCH & PLATFORM DOCUMENTATION PANEL
+                ABOUT HYBRIPAY PANEL
                 ---------------------------------------------------------------- */}
             {activePanel === 'docs' && (
               <div id="panel-docs" style={{ animation: 'fadeIn 0.4s ease-out' }}>
                 <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <i className="ti ti-presentation" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Platform Pitch & Interactive Documentation
+                  <i className="ti ti-info-circle" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> About HybriPay Interactive Overview
                 </div>
 
                 {/* Sub-tabs styling with pixel border and retro styling */}
