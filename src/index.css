@@ -19,69 +19,28 @@
   --arc-card: #161d28;
 }
 
-/* Light Mode overrides - a gorgeous, clean, highly readable crisp cream/light gray pixel layout */
-:root.light-mode {
-  --arc-bg: #f8fafc;
-  --arc-surface: #ffffff;
-  --arc-border: #cbd5e1;
-  --arc-accent: #0f766e; /* Cozy readable dark teal */
-  --arc-accent2: #7c3aed; /* Creative high-contrast purple */
-  --arc-text: #0f172a; /* Deep contrast charcoal for perfect reading */
-  --arc-muted: #475569; /* Soft dark slate for labels */
-  --arc-card: #ffffff; /* pure white cards */
+/* Dark Cyber theme overrides - high readability deep tech color palette */
+:root.dark-cyber {
+  --arc-bg: #040405;
+  --arc-surface: #0a0a0d;
+  --arc-border: #3c3218; /* Metallic gold-bronze dust border */
+  --arc-accent: #ffe135; /* Cyber gold accent */
+  --arc-accent2: #ff4444; /* Cyber crimson accent */
+  --arc-text: #f5f0e1; /* Warm high-contrast parchment white */
+  --arc-muted: #8d8b80; /* Desert dust grey */
+  --arc-card: #101014; /* Deep space matte black */
 }
 
-/* Clearer styles for Light Mode inputs and cards to secure elite readability */
-:root.light-mode .arc-stat-value {
-  color: #0f172a !important;
-}
-:root.light-mode .arc-panel,
-:root.light-mode .arc-card,
-:root.light-mode .arc-stat {
-  box-shadow: 2px 2px 0px #000000;
-  border-color: #000000;
-  background: #ffffff;
-}
-:root.light-mode input,
-:root.light-mode select,
-:root.light-mode textarea {
-  background-color: #f1f5f9 !important;
-  color: #0f172a !important;
-  border-color: #000000 !important;
-}
-:root.light-mode input::placeholder {
-  color: #94a3b8 !important;
-}
-:root.light-mode .arc-btn {
-  border-color: #000000 !important;
-}
-:root.light-mode .arc-nav-item.active {
-  background: var(--arc-accent) !important;
-  color: #ffffff !important;
-}
-:root.light-mode .arc-nav-item:not(.active) {
-  color: #475569 !important;
-}
-:root.light-mode .arc-nav-item:not(.active):hover {
-  background: #f1f5f9 !important;
-}
-:root.light-mode .arc-logo-text {
-  color: #0f172a !important;
-}
-:root.light-mode .arc-status {
-  color: #475569 !important;
-}
-:root.light-mode p,
-:root.light-mode div {
-  text-shadow: none !important;
-}
-:root.light-mode .arc-btn-outline {
-  background: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #000000 !important;
-}
-:root.light-mode .arc-btn-outline:hover {
-  background: #f8fafc !important;
+/* Starry night space canopy when Dark Cyber theme is selected */
+:root.dark-cyber body {
+  background-image: 
+    radial-gradient(#ffffff 1px, transparent 1px),
+    radial-gradient(#ffffff 1px, transparent 2px),
+    radial-gradient(#ffffff 1.5px, transparent 1.5px);
+  background-size: 400px 400px, 200px 200px, 250px 250px;
+  background-position: 0 0, 40px 60px, 130px 270px;
+  background-repeat: repeat;
+  background-color: #040405;
 }
 
 /* Scrollbar overhaul to pixel blocks */

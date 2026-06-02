@@ -159,16 +159,18 @@ export default function App() {
 
   // Loyalty Points & Gamification States
   const [activeTheme, setActiveTheme] = useState<string>(() => {
-    return localStorage.getItem('hybri_theme') || 'dark';
+    const saved = localStorage.getItem('hybri_theme');
+    if (saved === 'starwars') return 'darkcyber';
+    return saved || 'arc';
   });
 
   useEffect(() => {
     localStorage.setItem('hybri_theme', activeTheme);
     const root = document.documentElement;
-    if (activeTheme === 'light') {
-      root.classList.add('light-mode');
+    if (activeTheme === 'darkcyber') {
+      root.classList.add('dark-cyber');
     } else {
-      root.classList.remove('light-mode');
+      root.classList.remove('dark-cyber');
     }
   }, [activeTheme]);
 
@@ -1702,48 +1704,48 @@ export default function App() {
               <button 
                 type="button"
                 onClick={() => {
-                  setActiveTheme('dark');
-                  showToast('🌙 Activated Dark Mode');
+                  setActiveTheme('arc');
+                  showToast('🛰️ Activated Arc Cyber Theme');
                 }}
                 style={{ 
                   fontSize: '9px', 
                   fontFamily: "'Space Mono', monospace", 
                   padding: '2px 8px', 
-                  backgroundColor: activeTheme === 'dark' ? 'var(--arc-accent)' : 'transparent',
-                  color: activeTheme === 'dark' ? '#000000' : 'var(--arc-muted)',
+                  backgroundColor: activeTheme === 'arc' ? 'var(--arc-accent)' : 'transparent',
+                  color: activeTheme === 'arc' ? '#000000' : 'var(--arc-muted)',
                   border: 'none',
                   borderRadius: '2px',
                   cursor: 'pointer',
-                  fontWeight: activeTheme === 'dark' ? 'bold' : 'normal',
+                  fontWeight: activeTheme === 'arc' ? 'bold' : 'normal',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px'
                 }}
               >
-                <i className="ti ti-moon" style={{ fontSize: '10px' }} /> Dark Mode
+                <i className="ti ti-atom" style={{ fontSize: '10px' }} /> Arc Cyber
               </button>
               <button 
                 type="button"
                 onClick={() => {
-                  setActiveTheme('light');
-                  showToast('☀️ Activated Light Mode');
+                  setActiveTheme('darkcyber');
+                  showToast('🌌 Activated Dark Cyber Theme');
                 }}
                 style={{ 
                   fontSize: '9px', 
                   fontFamily: "'Space Mono', monospace", 
                   padding: '2px 8px', 
-                  backgroundColor: activeTheme === 'light' ? 'var(--arc-accent)' : 'transparent',
-                  color: activeTheme === 'light' ? '#ffffff' : 'var(--arc-muted)',
+                  backgroundColor: activeTheme === 'darkcyber' ? 'var(--arc-accent)' : 'transparent',
+                  color: activeTheme === 'darkcyber' ? '#000000' : 'var(--arc-muted)',
                   border: 'none',
                   borderRadius: '2px',
                   cursor: 'pointer',
-                  fontWeight: activeTheme === 'light' ? 'bold' : 'normal',
+                  fontWeight: activeTheme === 'darkcyber' ? 'bold' : 'normal',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px'
                 }}
               >
-                <i className="ti ti-sun" style={{ fontSize: '10px' }} /> Light Mode
+                <i className="ti ti-moon" style={{ fontSize: '10px' }} /> Dark Cyber
               </button>
             </div>
 
@@ -1793,7 +1795,7 @@ export default function App() {
             <div className="arc-nav-section">Wallet</div>
             
             <div className={`arc-nav-item ${activePanel === 'wallet' ? 'active' : ''}`} onClick={() => setActivePanel('wallet')}>
-              <i className="ti ti-wallet" aria-hidden="true"></i> Wallet Status
+              <i className="ti ti-wallet" aria-hidden="true"></i> Connect Wallet
             </div>
             
             <div className={`arc-nav-item ${activePanel === 'settings' ? 'active' : ''}`} onClick={() => setActivePanel('settings')}>
@@ -3052,7 +3054,7 @@ export default function App() {
             {activePanel === 'wallet' && (
               <div id="panel-wallet">
                 <div style={{ fontSize: '16px', fontWeight: 500, marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <i className="ti ti-wallet" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Wallet Status
+                  <i className="ti ti-wallet" style={{ color: 'var(--arc-accent)' }} aria-hidden="true"></i> Connect Wallet
                 </div>
                 <div className="arc-panel" style={{ maxWidth: '380px', textAlign: 'center', padding: '28px 20px' }}>
                   
